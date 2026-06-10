@@ -14,16 +14,16 @@ import (
 // BuiltinPatterns matches common credential formats by shape. They are applied
 // in addition to any user-supplied redact_patterns and known secret values.
 var BuiltinPatterns = []string{
-	`sk-ant-[A-Za-z0-9_-]{8,}`,            // Anthropic
-	`sk-[A-Za-z0-9_-]{16,}`,               // OpenAI and similar
-	`ghp_[A-Za-z0-9]{20,}`,                // GitHub personal access token
-	`gho_[A-Za-z0-9]{20,}`,                // GitHub OAuth token
-	`ghs_[A-Za-z0-9]{20,}`,                // GitHub server token
-	`github_pat_[A-Za-z0-9_]{20,}`,        // GitHub fine-grained PAT
-	`AKIA[0-9A-Z]{16}`,                    // AWS access key id
-	`AIza[0-9A-Za-z_\-]{20,}`,             // Google API key
-	`xox[baprs]-[A-Za-z0-9-]{10,}`,        // Slack token
-	`-----BEGIN [A-Z ]*PRIVATE KEY-----`,  // PEM private key block
+	`sk-ant-[A-Za-z0-9_-]{8,}`,           // Anthropic
+	`sk-[A-Za-z0-9_-]{16,}`,              // OpenAI and similar
+	`ghp_[A-Za-z0-9]{20,}`,               // GitHub personal access token
+	`gho_[A-Za-z0-9]{20,}`,               // GitHub OAuth token
+	`ghs_[A-Za-z0-9]{20,}`,               // GitHub server token
+	`github_pat_[A-Za-z0-9_]{20,}`,       // GitHub fine-grained PAT
+	`AKIA[0-9A-Z]{16}`,                   // AWS access key id
+	`AIza[0-9A-Za-z_\-]{20,}`,            // Google API key
+	`xox[baprs]-[A-Za-z0-9-]{10,}`,       // Slack token
+	`-----BEGIN [A-Z ]*PRIVATE KEY-----`, // PEM private key block
 }
 
 // Redactor replaces known secret values and pattern matches with placeholders.

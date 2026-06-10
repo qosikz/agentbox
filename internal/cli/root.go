@@ -1,73 +1,93 @@
+// Package cli implements AgentBox command parsing and routing. It contains no
+// business logic beyond dispatch and presentation; the work lives in the
+// internal packages it orchestrates.
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
-
-	"github.com/qosi/agentbox/internal/config"
 )
 
+// Root is the top-level command dispatcher.
 type Root struct {
 	Version string
 	Commit  string
 	Date    string
 }
 
+// NewRoot constructs the dispatcher.
 func NewRoot(version, commit, date string) *Root {
 	return &Root{Version: version, Commit: commit, Date: date}
 }
 
+// Run dispatches args (os.Args[1:]) and returns an error that may carry an
+// exit code (see CodedError / CodeFor).
 func (r *Root) Run(args []string) error {
 	if len(args) == 0 {
 		return r.help()
 	}
 
+	ctx := context.Background()
 	switch args[0] {
-	case "version":
-		fmt.Printf("agentbox %s commit=%s date=%s\n", r.Version, r.Commit, r.Date)
-		return nil
+	case "version", "--version", "-v":
+		return r.cmdVersion()
+	case "help", "--help", "-h":
+		return r.help()
 	case "init":
-		return config.WriteDefaultPolicy("agentbox.yaml")
+		return r.cmdInit(args[1:])
 	case "doctor":
-		fmt.Println("AgentBox doctor")
-		fmt.Println("TODO: check git, docker, policy, agents")
-		return nil
+		return r.cmdDoctor(args[1:])
 	case "policy":
-		if len(args) > 1 && args[1] == "check" {
-			_, err := config.LoadPolicy("agentbox.yaml")
-			if err != nil {
-				return err
-			}
-			fmt.Println("✓ Policy valid")
-			return nil
-		}
-		return fmt.Errorf("unknown policy command: %s", strings.Join(args[1:], " "))
+		return r.cmdPolicy(args[1:])
 	case "run":
-		if len(args) < 2 {
-			return fmt.Errorf("missing task: agentbox run \"fix failing tests\"")
-		}
-		fmt.Printf("AgentBox dry scaffold run: %s\n", strings.Join(args[1:], " "))
-		fmt.Println("TODO: create workspace, apply policy, run adapter, save session")
-		return nil
+		return r.cmdRun(ctx, args[1:])
 	case "session":
-		fmt.Println("TODO: session commands")
-		return nil
+		return r.cmdSession(args[1:])
 	case "mcp":
-		fmt.Println("TODO: MCP Guard scanner")
-		return nil
+		return r.cmdMCP(args[1:])
 	default:
-		return fmt.Errorf("unknown command: %s", args[0])
+		return codedf(ExitGeneral, "unknown command: %s\n\nRun 'agentbox help' to see available commands.", args[0])
 	}
 }
 
-func (r *Root) help() error {
-	fmt.Println(`AgentBox — safe workspaces for AI coding agents
-
-Usage:
-  agentbox init
-  agentbox run "fix failing tests"
-  agentbox policy check
-  agentbox doctor
-  agentbox version`)
+func (r *Root) cmdVersion() error {
+	fmt.Printf("agentbox %s commit=%s date=%s\n", r.Version, r.Commit, r.Date)
 	return nil
 }
+
+func (r *Root) help() error {
+	fmt.Println(strings.TrimSpace(helpText))
+	return nil
+}
+
+const helpText = `
+AgentBox — safe workspaces for AI coding agents
+
+Usage:
+  agentbox <command> [flags]
+
+Commands:
+  init                       Create agentbox.yaml and .agentbox/
+  run "<task>"               Run an agent in an isolated, policy-controlled workspace
+  policy check               Validate policy and show the effective configuration
+  mcp scan <path>            Statically scan an MCP server for dangerous capabilities
+  session list               List recorded sessions
+  session show [id|latest]   Show a session record
+  session replay [id|latest] Replay a session timeline, logs, and diff
+  doctor                     Diagnose local setup (git, docker, agents, config)
+  version                    Print version information
+
+Examples:
+  agentbox init
+  agentbox run "fix failing tests" --dry-run
+  agentbox run github.com/org/repo --task "add tests" --open-pr
+  agentbox run "refactor parser" --network deny --write ./src --write ./tests
+  agentbox mcp scan ./mcp-server
+
+Unsafe modes (--network open, --runtime local, --allow-host-home,
+--allow-docker-socket) require explicit confirmation or --yes-unsafe in CI.
+
+Global:
+  --json   Machine-readable output (supported by most commands)
+`

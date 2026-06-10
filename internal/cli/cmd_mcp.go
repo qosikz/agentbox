@@ -1,0 +1,86 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/qosi/agentbox/internal/config"
+	"github.com/qosi/agentbox/internal/mcpguard"
+)
+
+func (r *Root) cmdMCP(args []string) error {
+	if len(args) == 0 {
+		return codedf(ExitGeneral, "usage: agentbox mcp <scan|list> [path] [--json]")
+	}
+	switch args[0] {
+	case "scan":
+		return mcpScan(args[1:])
+	case "list":
+		return mcpList(args[1:])
+	default:
+		return codedf(ExitGeneral, "unknown mcp command: %s", args[0])
+	}
+}
+
+func mcpScan(args []string) error {
+	jsonOut := hasFlag(args, "--json")
+	var target string
+	for _, a := range args {
+		if a != "" && a[0] != '-' {
+			target = a
+			break
+		}
+	}
+	if target == "" {
+		return codedf(ExitGeneral, "usage: agentbox mcp scan <path> [--json]")
+	}
+	if looksLikeRepo(target) {
+		return codedf(ExitGeneral, "remote MCP scanning is not supported yet.\nClone the server locally and scan the path:\n  git clone %s && agentbox mcp scan ./<dir>", target)
+	}
+
+	report, err := mcpguard.Scan(target)
+	if err != nil {
+		return coded(ExitGeneral, err)
+	}
+
+	if jsonOut {
+		data, jerr := report.JSON()
+		if jerr != nil {
+			return coded(ExitGeneral, jerr)
+		}
+		fmt.Println(string(data))
+	} else {
+		fmt.Print(report.Human())
+	}
+
+	// Non-zero exit when the server is unsafe, so CI can gate on it.
+	if report.Result == "unsafe" {
+		return &CodedError{Code: ExitPolicyViolation, Err: errors.New("")}
+	}
+	return nil
+}
+
+func mcpList(args []string) error {
+	jsonOut := hasFlag(args, "--json")
+	path := flagValue(args, "--policy", "agentbox.yaml")
+	cfg, err := config.LoadPolicy(path)
+	if err != nil {
+		return coded(ExitInvalidConfig, err)
+	}
+	if jsonOut {
+		return printJSON(os.Stdout, cfg.MCP)
+	}
+	fmt.Printf("MCP policy (mode: %s)\n", cfg.MCP.Mode)
+	fmt.Printf("  allow: %s\n", orNoneList(cfg.MCP.Allow))
+	fmt.Printf("  deny:  %s\n", orNoneList(cfg.MCP.Deny))
+	return nil
+}
+
+func orNoneList(items []string) string {
+	if len(items) == 0 {
+		return "(none)"
+	}
+	return strings.Join(items, ", ")
+}
