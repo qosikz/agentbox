@@ -1,0 +1,54 @@
+runtime:
+  isolation: container
+  engine: docker
+  image: agentbox/default:latest
+  cleanup: true
+
+agent:
+  default: custom
+  custom:
+    command: echo
+    args:
+      - "{{ task }}"
+
+network:
+  mode: deny
+
+filesystem:
+  readonly:
+    - .
+  write:
+    - ./src
+    - ./tests
+  deny:
+    - .env
+    - .env.*
+    - "**/*secret*"
+    - "**/*credential*"
+    - ~/.ssh
+    - ~/.aws
+    - ~/.kube
+    - ~/.config
+    - ~/.docker
+
+secrets:
+  mode: explicit
+  allow: []
+  deny:
+    - "*"
+
+mcp:
+  mode: denyall
+
+commands:
+  allow:
+    - go test ./...
+    - npm test
+    - pytest
+  deny:
+    - "*"
+
+budget:
+  max_usd: 1
+  max_tokens: 200000
+  max_runtime_minutes: 10

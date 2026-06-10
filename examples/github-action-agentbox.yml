@@ -1,0 +1,41 @@
+name: AgentBox
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Task for AgentBox"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+jobs:
+  agentbox:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.labels.*.name, 'agentbox')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install AgentBox
+        run: |
+          go install github.com/qosi/agentbox/cmd/agentbox@latest
+
+      - name: Run AgentBox
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TASK="${{ github.event.inputs.task || github.event.issue.title }}"
+          agentbox run "$TASK" --policy agentbox.yaml --open-pr
+
+      - name: Upload AgentBox session
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentbox-session
+          path: .agentbox/sessions/

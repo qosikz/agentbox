@@ -1,0 +1,5 @@
+bin/
+.agentbox/
+*.test
+coverage.out
+.DS_Store

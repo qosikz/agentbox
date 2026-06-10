@@ -1,0 +1,75 @@
+runtime:
+  isolation: container
+  engine: docker
+  image: agentbox/default:latest
+  cleanup: true
+
+agent:
+  default: custom
+  custom:
+    command: echo
+    args:
+      - "{{ task }}"
+
+network:
+  mode: deny
+  allow:
+    - github.com
+    - pypi.org
+    - registry.npmjs.org
+
+filesystem:
+  readonly:
+    - .
+  write:
+    - ./src
+    - ./tests
+    - ./docs
+  deny:
+    - .env
+    - .env.*
+    - ~/.ssh
+    - ~/.aws
+    - ~/.kube
+    - ~/.docker
+
+secrets:
+  mode: explicit
+  allow:
+    - GITHUB_TOKEN
+  deny:
+    - OPENAI_API_KEY
+    - ANTHROPIC_API_KEY
+    - AWS_SECRET_ACCESS_KEY
+
+mcp:
+  mode: allowlist
+  allow:
+    - github-readonly
+    - filesystem-readonly
+  deny:
+    - shell-unrestricted
+    - filesystem-write-all
+
+commands:
+  allow:
+    - go test ./...
+    - npm test
+    - pnpm test
+    - pytest
+  deny:
+    - rm -rf
+    - ssh
+    - scp
+    - docker run --privileged
+    - kubectl
+    - terraform apply
+
+budget:
+  max_usd: 5
+  max_tokens: 1000000
+  max_runtime_minutes: 30
+
+tests:
+  commands:
+    - go test ./...
