@@ -2,7 +2,7 @@
 
 All notable changes to AgentBox are documented here.
 
-## Unreleased
+## v0.3.2 — 2026-06-12 (public-home prep)
 
 ### Changed
 - **Module path renamed** `github.com/qosi/agentbox` → `github.com/qosikz/agentbox`
