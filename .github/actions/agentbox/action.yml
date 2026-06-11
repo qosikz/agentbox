@@ -1,0 +1,60 @@
+name: AgentBox
+description: Run an AI coding agent safely in an AgentBox workspace and upload the session.
+
+inputs:
+  task:
+    description: Task for the agent.
+    required: true
+  agent:
+    description: Adapter to use (custom, aider).
+    required: false
+    default: custom
+  policy:
+    description: Policy file path.
+    required: false
+    default: agentbox.yaml
+  dry_run:
+    description: Plan only; do not execute the agent. Strongly recommended for fork PRs.
+    required: false
+    default: "true"
+  open_pr:
+    description: Open a pull request with the changes (requires a write token and the gh CLI).
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: "1.23"
+
+    - name: Build AgentBox
+      shell: bash
+      run: |
+        # During the preview the module is unpublished, so build from this repo.
+        # Once published you can replace this with:
+        #   go install github.com/qosi/agentbox/cmd/agentbox@latest
+        go build -o "$RUNNER_TEMP/agentbox" ./cmd/agentbox
+
+    - name: Run AgentBox
+      shell: bash
+      env:
+        AGENTBOX_TASK: ${{ inputs.task }}
+      run: |
+        ARGS=(run "$AGENTBOX_TASK" --policy "${{ inputs.policy }}" --agent "${{ inputs.agent }}")
+        if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS+=(--dry-run); fi
+        if [ "${{ inputs.open_pr }}" = "true" ]; then ARGS+=(--open-pr --commit); fi
+        # CI is non-interactive: --yes-unsafe is required only if the policy enables
+        # an unsafe mode. Safe policies never trip it.
+        ARGS+=(--yes-unsafe)
+        "$RUNNER_TEMP/agentbox" "${ARGS[@]}"
+
+    - name: Upload AgentBox session
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: agentbox-session
+        path: .agentbox/sessions/
+        if-no-files-found: ignore

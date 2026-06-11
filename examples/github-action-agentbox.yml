@@ -1,41 +1,47 @@
+# Example AgentBox workflow.
+#
+# Copy this to .github/workflows/agentbox.yml in your repository. It runs
+# AgentBox in DRY-RUN by default and uploads the session as an artifact, so it
+# is safe to enable on pull requests (including from forks) without exposing
+# secrets or write tokens.
+#
+# To let AgentBox open pull requests, set dry_run: "false" and open_pr: "true"
+# on a trusted trigger (e.g. workflow_dispatch or a label on a non-fork PR), and
+# grant contents/pull-requests write only there.
 name: AgentBox
 
 on:
-  issues:
-    types: [labeled]
   workflow_dispatch:
     inputs:
       task:
         description: "Task for AgentBox"
         required: true
         type: string
+      dry_run:
+        description: "Plan only (recommended)"
+        required: false
+        default: "true"
+        type: string
+  issues:
+    types: [labeled]
 
+# Minimal permissions. Only the dry-run/read path needs these; raise to
+# contents: write + pull-requests: write ONLY for a trusted open-pr trigger.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
   issues: read
 
 jobs:
   agentbox:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.labels.*.name, 'agentbox')
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install AgentBox
-        run: |
-          go install github.com/qosi/agentbox/cmd/agentbox@latest
-
-      - name: Run AgentBox
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TASK="${{ github.event.inputs.task || github.event.issue.title }}"
-          agentbox run "$TASK" --policy agentbox.yaml --open-pr
-
-      - name: Upload AgentBox session
-        uses: actions/upload-artifact@v4
+      # Uses the composite action shipped in this repository.
+      - uses: ./.github/actions/agentbox
         with:
-          name: agentbox-session
-          path: .agentbox/sessions/
+          task: ${{ github.event.inputs.task || github.event.issue.title }}
+          policy: agentbox.yaml
+          dry_run: ${{ github.event.inputs.dry_run || 'true' }}
+          open_pr: "false"
