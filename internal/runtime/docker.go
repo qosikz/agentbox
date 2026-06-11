@@ -118,6 +118,114 @@ func (r containerRunner) Run(ctx context.Context, spec RuntimeSpec, command Comm
 	return result, nil
 }
 
+// ProbeBinary reports whether bin is resolvable inside image by running a
+// throwaway, fully-isolated probe container. See the Runner interface for the
+// (present, err) contract. It is used to validate a baked-in agent before a
+// container run — the host PATH is irrelevant when the agent lives in the
+// image.
+func (r containerRunner) ProbeBinary(ctx context.Context, image, bin string) (bool, error) {
+	if err := r.Available(ctx); err != nil {
+		return false, err
+	}
+	// Bound the probe so a wedged daemon cannot hang the whole run.
+	pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Name the probe container so cancellation can force-remove it in the
+	// daemon. With `docker run`, killing only the CLI client leaves the
+	// container (and its --rm cleanup) behind under the daemon — the same leak
+	// the Run path guards against; the preflight probe must not be weaker.
+	name := containerName()
+	args := insertContainerName(ProbeBinaryArgs(image, bin), name)
+
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(pctx, r.engine, args...)
+	cmd.Stderr = &stderr
+	cmd.Cancel = func() error {
+		killCtx, c := context.WithTimeout(context.Background(), 15*time.Second)
+		defer c()
+		_ = exec.CommandContext(killCtx, r.engine, "rm", "-f", name).Run()
+		return cmd.Process.Kill()
+	}
+	cmd.WaitDelay = 5 * time.Second
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return probeResult(exitErr.ExitCode(), stderr.String(), r.engine, image)
+		}
+		// Could not even start the engine (e.g. context cancelled): inconclusive.
+		return false, fmt.Errorf("probing image %q for %q via %s: %w", image, bin, r.engine, err)
+	}
+	return true, nil
+}
+
+// probeAbsentExit is a sentinel exit code our probe shell emits when the binary
+// is conclusively absent. Using an explicit sentinel (rather than `command -v`'s
+// own exit status) makes the result shell-agnostic: POSIX shells disagree on the
+// failure code of `command -v` (bash returns 1, dash returns 127), and 127 also
+// means "no shell in image", so relying on it would be ambiguous.
+const probeAbsentExit = 42
+
+// ProbeBinaryArgs returns the engine CLI arguments for a probe container that
+// checks whether bin is resolvable inside image. The probe carries the same
+// hardening as a real run (capabilities dropped, no privilege escalation, no
+// network) and removes itself; it never mounts anything. PURE and testable.
+func ProbeBinaryArgs(image, bin string) []string {
+	return []string{
+		"run", "--rm",
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges",
+		"--network", "none",
+		// Non-root, matching the run path (buildRuntimeSpec). The host-PATH check
+		// it replaces ran as the host user; the probe must not silently run as
+		// root in images that declare no USER. command -v needs no privileges.
+		"--user", "10001:10001",
+		// Override any custom entrypoint so the probe is the shell test below,
+		// not the agent itself (which could be long-running or interactive).
+		"--entrypoint", "sh",
+		image,
+		// `--` ends option parsing so a binary name beginning with "-" is treated
+		// as an operand, not a flag to `command`. The sentinel exit keeps the
+		// present/absent decision shell-agnostic.
+		"-c", "command -v -- " + shellSingleQuote(bin) + " >/dev/null 2>&1 && exit 0 || exit " + fmt.Sprint(probeAbsentExit),
+	}
+}
+
+// probeResult maps a probe container's exit onto the ProbeBinary contract.
+// PURE so the mapping can be asserted without an engine.
+//
+//   - 0                 shell ran and found bin              -> present.
+//   - probeAbsentExit   shell ran and did NOT find bin        -> conclusively absent.
+//   - else (125 engine, 127 no shell, ...)                    -> inconclusive: do
+//     not block; the real run surfaces any genuine failure.
+func probeResult(exitCode int, stderr, engine, image string) (bool, error) {
+	switch exitCode {
+	case 0:
+		return true, nil
+	case probeAbsentExit:
+		return false, nil
+	default:
+		excerpt := strings.TrimSpace(stderr)
+		const maxExcerpt = 160
+		if len(excerpt) > maxExcerpt {
+			excerpt = excerpt[:maxExcerpt] + "..."
+		}
+		msg := fmt.Sprintf("agent probe in image %q was inconclusive (%s exit %d)", image, engine, exitCode)
+		if excerpt != "" {
+			msg += ": " + excerpt
+		}
+		return false, errors.New(msg)
+	}
+}
+
+// shellSingleQuote wraps s in single quotes, escaping any embedded single
+// quotes, so it is safe to interpolate into a `sh -c` string. Agent binary
+// names are normally plain, but a malformed policy must never let a value break
+// out of the probe command.
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // engineFailureMarkers are stderr fragments (lowercase) that identify a
 // container-engine failure as opposed to the agent's own output. Exit code 125
 // alone is ambiguous: docker/podman reserve it for engine failures, but an

@@ -470,3 +470,97 @@ func TestContainerNameUnique(t *testing.T) {
 		t.Errorf("container name should be agentbox-prefixed, got %q", a)
 	}
 }
+
+// --- ProbeBinary helpers (pure, no engine required) ---
+
+func TestProbeBinaryArgs_Hardened(t *testing.T) {
+	args := ProbeBinaryArgs("agentbox/codex:latest", "codex")
+	// Same hardening as a real run, plus full network isolation and self-removal.
+	if len(args) < 2 || args[0] != "run" || args[1] != "--rm" {
+		t.Fatalf("probe must start with `run --rm`, got %v", args)
+	}
+	for _, want := range [][2]string{
+		{"--cap-drop", "ALL"},
+		{"--security-opt", "no-new-privileges"},
+		{"--network", "none"},
+		{"--user", "10001:10001"}, // non-root, same as the run path
+		{"--entrypoint", "sh"},
+	} {
+		if !containsPair(args, want[0], want[1]) {
+			t.Errorf("probe args missing %q %q: %v", want[0], want[1], args)
+		}
+	}
+	// The probe must NEVER mount anything, expose the docker socket, run
+	// privileged, or run as root.
+	for _, banned := range []string{"-v", "--privileged", "/var/run/docker.sock", "0:0"} {
+		if contains(args, banned) {
+			t.Errorf("probe args must not contain %q: %v", banned, args)
+		}
+	}
+	// Image precedes the shell command, which tests the binary (with `--` so a
+	// dash-prefixed name is an operand, not a flag) and emits the shell-agnostic
+	// sentinel exit code when the binary is absent.
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "agentbox/codex:latest -c command -v -- 'codex'") {
+		t.Errorf("probe command shape unexpected: %v", args)
+	}
+	if !strings.Contains(joined, "exit 42") {
+		t.Errorf("probe must emit the sentinel absent exit code (42): %v", args)
+	}
+}
+
+func TestProbeBinaryArgs_QuotesBinary(t *testing.T) {
+	// A hostile/malformed binary name must not break out of the sh -c string.
+	args := ProbeBinaryArgs("img", "x'; rm -rf /; '")
+	last := args[len(args)-1]
+	if strings.Contains(last, "rm -rf /;") && !strings.Contains(last, `'\''`) {
+		t.Errorf("binary name was not safely single-quoted: %q", last)
+	}
+}
+
+func TestProbeResult_Mapping(t *testing.T) {
+	tests := []struct {
+		name        string
+		exit        int
+		stderr      string
+		wantPresent bool
+		wantErr     bool
+	}{
+		{"present", 0, "", true, false},
+		{"absent sentinel", probeAbsentExit, "", false, false},
+		{"engine error 125", 125, "Unable to find image", false, true},
+		{"no shell 127", 127, "exec: \"sh\": not found", false, true},
+		{"command-v dash 127", 127, "", false, true},
+		{"weird 126", 126, "permission denied", false, true},
+		{"stray exit 1 inconclusive", 1, "", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			present, err := probeResult(tt.exit, tt.stderr, "docker", "img")
+			if present != tt.wantPresent {
+				t.Errorf("present = %v, want %v", present, tt.wantPresent)
+			}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("err = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDryRunRunner_ProbeBinaryAlwaysPresent(t *testing.T) {
+	ok, err := NewDryRunRunner().ProbeBinary(context.Background(), "any", "anything")
+	if !ok || err != nil {
+		t.Errorf("dry-run probe = (%v,%v), want (true,nil)", ok, err)
+	}
+}
+
+func TestLocalRunner_ProbeBinaryUsesHostPath(t *testing.T) {
+	r := NewLocalRunner()
+	// A binary that is essentially always present on the host PATH.
+	if ok, err := r.ProbeBinary(context.Background(), "ignored", "sh"); err != nil || !ok {
+		t.Errorf("local probe for sh = (%v,%v), want (true,nil)", ok, err)
+	}
+	if ok, err := r.ProbeBinary(context.Background(), "ignored", "definitely-not-a-real-binary-xyzzy"); err != nil || ok {
+		t.Errorf("local probe for missing binary = (%v,%v), want (false,nil)", ok, err)
+	}
+}

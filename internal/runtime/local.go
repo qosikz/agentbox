@@ -22,6 +22,16 @@ func (localRunner) Name() string { return "local" }
 // Available always succeeds: local execution has no external dependency.
 func (localRunner) Available(ctx context.Context) error { return nil }
 
+// ProbeBinary checks the HOST PATH, because local mode executes on the host.
+// image is ignored. A missing binary is reported conclusively (false, nil) so
+// the caller can fail with an actionable error.
+func (localRunner) ProbeBinary(ctx context.Context, image, bin string) (bool, error) {
+	if _, err := exec.LookPath(bin); err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (localRunner) Run(ctx context.Context, spec RuntimeSpec, command CommandSpec) (RunResult, error) {
 	if command.Timeout > 0 {
 		var cancel context.CancelFunc

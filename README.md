@@ -152,6 +152,47 @@ explicitly allowlisted secrets. For container runs the agent CLI must exist in
 your runtime image and its API key must be allowlisted in `secrets.allow`;
 keychain/OAuth logins (like `claude`'s) only work in local mode.
 
+### Run an agent fully containerized (baked-in agents)
+
+To run a coding agent inside the sandbox, **bake its CLI into a runtime image**
+and let AgentBox run it under policy. The agent binary lives in the image, not
+on your host — AgentBox preflights it by probing the image, so a baked-in agent
+you have never installed locally still runs.
+
+```bash
+# Build an image with the agent CLI baked in (examples in examples/agents/):
+docker build -t agentbox/codex:latest -f examples/agents/codex.Dockerfile examples/agents
+
+# Inject the key at runtime (NEVER baked into the image) and run.
+# (Illustrative — Codex auth/sandbox specifics are version-dependent; the stub
+# below is the verified path. `codex exec` reads CODEX_API_KEY.)
+export CODEX_API_KEY=sk-...
+agentbox run "add a test for parseConfig" --policy examples/agentbox.codex.yaml --yes-unsafe
+```
+
+- **The API key is never in the image.** Image layers are immutable and would
+  leak a baked-in secret via `docker history` / `docker save` / a registry push.
+  AgentBox reads the key from your host env, injects it into the container only
+  when `secrets.allow` lists it (and `secrets.deny` does not), and redacts its
+  value from logs, diffs, and session metadata.
+- **Network caveat (honest):** a real agent must reach its model API, but
+  `network.mode: allowlist` is **not enforced yet** (no egress proxy) and falls
+  back to `deny`. So a real agent run currently needs `network: open` — an
+  explicit unsafe mode. Enforced allowlist egress is the next safety milestone.
+
+Prove the whole path for free with the bundled **stub agent** — no key, no
+network, no spend:
+
+```bash
+docker build -t agentbox/stub-agent:latest -f examples/agents/stub.Dockerfile examples/agents
+AGENTBOX_FAKE_API_KEY=dummy-not-a-real-key \
+  agentbox run "prove the path" --policy examples/agentbox.stub.yaml
+```
+
+The stub confirms the injected key reached the container and writes a file; the
+saved session shows the dummy key only as `[REDACTED:AGENTBOX_FAKE_API_KEY]`.
+See [examples/agents/README.md](examples/agents/README.md) for the full guide.
+
 ## Use AgentBox FROM your agent (harness integration)
 
 The inverse direction is just as useful: an agent harness running on your

@@ -178,20 +178,20 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 	}
 	if ep.EnforcedNetwork() == "deny" {
 		rec.PolicyBlocked("outbound network access (network=" + ep.Network.Mode + ")")
+		// Honesty note, conditional by design: a baked-in agent that must reach
+		// a model API cannot do so under network=deny, and allowlist egress is
+		// not enforced yet — such a run needs network: open (unsafe). Phrased as
+		// "if it needs to reach a remote API" because many agents/tasks (and the
+		// bundled stub fixture) run fully offline and need no change.
+		if !o.dryRun && ep.Runtime.Isolation != "local" && len(ep.Secrets.Allow) > 0 {
+			rec.Logf("note: network is denied; if this agent needs to reach a remote API it will fail (allowlist egress is not enforced yet — a real agent run that calls out needs network: open, which is unsafe). Offline agents are unaffected.")
+		}
 	}
 
-	// 6. Select and check the agent adapter.
+	// 6. Select the agent adapter and build its command.
 	adapter, err := adapters.Get(ep.Agent.Default, cfg.Agent.Custom)
 	if err != nil {
 		return finishErr(rec, red, coded(ExitAgentFailed, err))
-	}
-	if cerr := adapter.Check(ctx); cerr != nil {
-		if o.dryRun {
-			warn(cerr.Error())
-			rec.Logf("agent check: %v", cerr)
-		} else {
-			return finishErr(rec, red, coded(ExitAgentFailed, cerr))
-		}
 	}
 
 	agentEnv := buildAgentEnv(ep)
@@ -203,12 +203,19 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 	rec.Event(session.EvAgentStarted)
 
 	// 7. Select the runner and verify availability.
-	runner, rerr := selectRunner(ep, o)
+	runner, rerr := selectRunnerFn(ep, o)
 	if rerr != nil {
 		return finishErr(rec, red, rerr)
 	}
 	if err := runner.Available(ctx); err != nil {
 		return finishErr(rec, red, codedf(ExitRuntimeUnavail, "%v", err))
+	}
+
+	// 7b. Preflight the agent binary in the environment that will actually run
+	//     it (host PATH for local; the runtime image for container). This
+	//     replaces a host-only check that wrongly failed baked-in agents.
+	if perr := preflightAgent(ctx, ep, o, runner, adapter, cmd.Executable, rec); perr != nil {
+		return finishErr(rec, red, perr)
 	}
 
 	// 8. For real runs, materialize a disposable, sanitized workspace copy for
@@ -519,6 +526,48 @@ func buildRuntimeSpec(ep policy.EffectivePolicy, plan workspace.Plan, root strin
 		ReadOnlyPaths:     nil,
 		WritePaths:        writeMounts,
 	}
+}
+
+// selectRunnerFn is a seam so tests can inject a runner without a container
+// engine. Production always uses selectRunner.
+var selectRunnerFn = selectRunner
+
+// preflightAgent verifies the agent binary is reachable in the environment that
+// will run it. Local isolation executes on the host, so the binary must be on
+// the host PATH (adapter.Check). Container isolation runs the binary from
+// inside the image (a baked-in agent), so the host PATH is irrelevant — probe
+// the image instead. Container dry-runs skip the probe so planning never needs
+// a daemon.
+func preflightAgent(ctx context.Context, ep policy.EffectivePolicy, o runOptions, runner runtime.Runner, adapter adapters.Adapter, bin string, rec *session.Recorder) error {
+	if ep.Runtime.Isolation == "local" {
+		if cerr := adapter.Check(ctx); cerr != nil {
+			if o.dryRun {
+				warn(cerr.Error())
+				rec.Logf("agent check: %v", cerr)
+				return nil
+			}
+			return coded(ExitAgentFailed, cerr)
+		}
+		return nil
+	}
+	// Container isolation.
+	if o.dryRun {
+		return nil
+	}
+	present, perr := runner.ProbeBinary(ctx, ep.Runtime.Image, bin)
+	if perr != nil {
+		// Inconclusive probe (daemon down, image missing, no shell in image):
+		// do NOT block. The real run surfaces a genuine engine/image failure
+		// with full, actionable detail (see engineFailureError).
+		rec.Logf("agent preflight probe inconclusive for %q in %q: %v", bin, ep.Runtime.Image, perr)
+		return nil
+	}
+	if !present {
+		return codedf(ExitAgentFailed,
+			"agent %q is not installed in runtime image %q.\nBake the agent into the image (see examples/agents/README.md) or set runtime.image to one that contains it.\nTo run on the host instead, use --runtime local (unsafe).",
+			bin, ep.Runtime.Image)
+	}
+	return nil
 }
 
 func selectRunner(ep policy.EffectivePolicy, o runOptions) (runtime.Runner, error) {

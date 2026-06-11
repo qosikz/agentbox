@@ -2,6 +2,50 @@
 
 All notable changes to AgentBox are documented here.
 
+## v0.3.0 — 2026-06-11 (containerized agents)
+
+Run a coding agent fully inside the sandbox: bake its CLI into a runtime image
+and let AgentBox run it under policy, with credentials injected at runtime and
+redacted from logs.
+
+### Added
+- **Baked-in agent support.** The agent CLI can now live only in the runtime
+  image. AgentBox preflights the agent by **probing the image** (a hardened,
+  no-network, self-removing throwaway container) instead of the host PATH, so a
+  containerized agent you have never installed locally runs correctly. A missing
+  agent yields an actionable, image-aware error before anything executes.
+- `examples/agents/` — worked runtime images and a guide:
+  - `stub.Dockerfile` + `stub-agent.sh` — a zero-cost proof fixture that
+    confirms a policy-injected key reaches the container and is redacted, with
+    no API key and no network.
+  - `codex.Dockerfile` — an illustrative image baking the OpenAI Codex CLI in
+    (auth/sandbox setup is provider- and version-specific; the stub is the
+    verified zero-cost path). Uses `CODEX_API_KEY`, matching the codex adapter.
+  - `README.md` — the baked-in-agent model, runtime secret injection, and the
+    honest network limitation.
+- Example policies `examples/agentbox.stub.yaml` and `examples/agentbox.codex.yaml`.
+- `runtime.Runner` gains `ProbeBinary(ctx, image, bin)` (implemented for
+  docker/podman, local, and dry-run runners).
+
+### Changed
+- The agent preflight is now **isolation-aware**: local isolation checks the
+  host PATH (as before); container isolation probes the image. Container
+  dry-runs skip the probe entirely, so planning never needs a daemon — and the
+  previous spurious "agent not found on PATH" warning for container dry-runs is
+  gone.
+- A real container agent run under `network=deny` with allowlisted secrets now
+  records a note that the agent cannot reach a remote API (allowlist egress is
+  still unenforced).
+
+### Security
+- Credentials for a baked-in agent are injected **only at runtime** under
+  `secrets.allow` (deny still overrides allow; the secure defaults keep
+  `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`AWS_SECRET_ACCESS_KEY` out unless you
+  remove them from `deny` deliberately) and are redacted from all recorded
+  artifacts. No example image contains a key, an `ENV`, or an `ARG` for one.
+- The image probe is unprivileged: `--cap-drop ALL`, `--security-opt
+  no-new-privileges`, `--network none`, `--rm`, no mounts.
+
 ## v0.2.0 — 2026-06-11 (harness integration)
 
 AgentBox now works in BOTH directions: it sandboxes agents, and agent

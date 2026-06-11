@@ -56,4 +56,16 @@ type Runner interface {
 	Available(ctx context.Context) error
 	// Run executes command under spec.
 	Run(ctx context.Context, spec RuntimeSpec, command CommandSpec) (RunResult, error)
+	// ProbeBinary reports whether bin is resolvable in the execution
+	// environment for image. It replaces a host-PATH check for container
+	// isolation, where the agent binary lives inside the image (a baked-in
+	// agent), not on the host. The result is advisory, not a security control:
+	//
+	//   (true, nil)   bin is present — proceed.
+	//   (false, nil)  bin is conclusively absent — the caller should fail with
+	//                 an actionable "install it in the image" error.
+	//   (false, err)  the probe was inconclusive (daemon down, image missing,
+	//                 no shell in image, ...) — the caller should NOT block; the
+	//                 real run will surface any genuine failure with full detail.
+	ProbeBinary(ctx context.Context, image, bin string) (bool, error)
 }

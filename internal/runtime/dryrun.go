@@ -23,6 +23,12 @@ func (dryRunRunner) Name() string { return "dryrun" }
 // Available always succeeds: planning has no external dependencies.
 func (dryRunRunner) Available(ctx context.Context) error { return nil }
 
+// ProbeBinary always reports present: a dry run never executes the agent and
+// must not require a container engine or daemon to plan.
+func (dryRunRunner) ProbeBinary(ctx context.Context, image, bin string) (bool, error) {
+	return true, nil
+}
+
 // Run produces a RunResult describing the intended actions without executing
 // anything. ExitCode is 0 and DryRun is true.
 func (dryRunRunner) Run(ctx context.Context, spec RuntimeSpec, command CommandSpec) (RunResult, error) {

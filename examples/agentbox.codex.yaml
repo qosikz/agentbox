@@ -1,0 +1,54 @@
+# AgentBox policy — run the OpenAI Codex CLI as a baked-in, sandboxed agent.
+#
+# ILLUSTRATIVE template, not a verified turnkey run: Codex's auth and its own
+# sandbox behavior are provider-specific and version-dependent. The VERIFIED
+# zero-cost path is the stub (examples/agentbox.stub.yaml). Treat this as a
+# starting point and consult the Codex docs for your version.
+#
+#   docker build -t agentbox/codex:latest -f examples/agents/codex.Dockerfile examples/agents
+#   export CODEX_API_KEY=sk-...            # see note below
+#   agentbox run "add a test for parseConfig" --policy examples/agentbox.codex.yaml --yes-unsafe
+#
+# Why --yes-unsafe? A real agent must reach the model API, but network.mode
+# allowlist is NOT enforced yet (no egress proxy), so reaching the API requires
+# network: open, which is an explicit unsafe mode. See ./agents/README.md.
+
+runtime:
+  isolation: container
+  engine: docker
+  image: agentbox/codex:latest          # the codex CLI is baked into this image
+  cleanup: true
+
+agent:
+  default: codex                        # runs: codex exec --sandbox workspace-write "{{ task }}"
+
+network:
+  mode: open                            # UNSAFE: required today so codex can reach the API
+
+secrets:
+  mode: explicit
+  # Inject the key at runtime (never baked into the image) and redact it from
+  # logs. `codex exec` reads CODEX_API_KEY for a single non-interactive run
+  # (per the Codex docs and internal/adapters/codex.go). CODEX_API_KEY is not in
+  # the secure-default deny list, so no deny override is needed here.
+  allow:
+    - CODEX_API_KEY
+  redact_patterns:
+    - "sk-[A-Za-z0-9_-]+"
+
+# Two gotchas you may hit with the default `agent.default: codex` path:
+#   1. Codex ships its own Landlock/Seatbelt sandbox, which can CONFLICT with
+#      AgentBox's container. Inside AgentBox the container IS the boundary, so
+#      you may need to bypass Codex's sandbox (see the custom block below).
+#   2. If your Codex version prefers ChatGPT login over the API key, you may
+#      need `--config preferred_auth_method=apikey`.
+# The custom adapter lets you set both explicitly:
+#
+# agent:
+#   default: custom
+#   custom:
+#     command: codex
+#     args:
+#       - "exec"
+#       - "--dangerously-bypass-approvals-and-sandbox"
+#       - "{{ task }}"
