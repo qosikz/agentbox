@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/qosi/agentbox/internal/config"
-	"github.com/qosi/agentbox/internal/mcpguard"
-	"github.com/qosi/agentbox/internal/mcpserve"
+	"github.com/qosikz/agentbox/internal/config"
+	"github.com/qosikz/agentbox/internal/mcpguard"
+	"github.com/qosikz/agentbox/internal/mcpserve"
 )
 
 func (r *Root) cmdMCP(args []string) error {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qosi/agentbox/internal/config"
+	"github.com/qosikz/agentbox/internal/config"
 )
 
 func TestCustomAdapterName(t *testing.T) {

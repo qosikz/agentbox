@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/qosi/agentbox/internal/config"
-	"github.com/qosi/agentbox/internal/policy"
+	"github.com/qosikz/agentbox/internal/config"
+	"github.com/qosikz/agentbox/internal/policy"
 )
 
 func (r *Root) cmdPolicy(args []string) error {

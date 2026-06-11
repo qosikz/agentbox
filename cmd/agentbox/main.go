@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/qosi/agentbox/internal/cli"
+	"github.com/qosikz/agentbox/internal/cli"
 )
 
 // Build-time variables injected via -ldflags.

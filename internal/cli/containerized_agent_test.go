@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qosi/agentbox/internal/config"
-	"github.com/qosi/agentbox/internal/policy"
-	"github.com/qosi/agentbox/internal/runtime"
+	"github.com/qosikz/agentbox/internal/config"
+	"github.com/qosikz/agentbox/internal/policy"
+	"github.com/qosikz/agentbox/internal/runtime"
 )
 
 // An allowlisted secret must be injected into the CONTAINER environment so a

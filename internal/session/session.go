@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qosi/agentbox/internal/secrets"
+	"github.com/qosikz/agentbox/internal/secrets"
 )
 
 // Session is the structured record persisted as session.json.

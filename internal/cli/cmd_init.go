@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/qosi/agentbox/internal/config"
+	"github.com/qosikz/agentbox/internal/config"
 )
 
 func (r *Root) cmdInit(args []string) error {

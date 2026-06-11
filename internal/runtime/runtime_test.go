@@ -12,7 +12,7 @@ import (
 func secureSpec() RuntimeSpec {
 	return RuntimeSpec{
 		Engine:      "docker",
-		Image:       "ghcr.io/qosi/agentbox:latest",
+		Image:       "ghcr.io/qosikz/agentbox:latest",
 		NetworkMode: "none",
 		Workdir:     "/work",
 		User:        "10001:10001",
@@ -75,7 +75,7 @@ func TestBuildDockerArgs_SecureDefaults(t *testing.T) {
 		t.Errorf("must NOT mount docker.sock by default, got %v", args)
 	}
 	// Image and exec must come after the flags, in order.
-	if args[len(args)-3] != "ghcr.io/qosi/agentbox:latest" {
+	if args[len(args)-3] != "ghcr.io/qosikz/agentbox:latest" {
 		t.Errorf("expected image before executable, got %v", args)
 	}
 	if args[len(args)-2] != "agent-cli" || args[len(args)-1] != "--help" {
@@ -383,7 +383,7 @@ func TestPodmanRunner_Available(t *testing.T) {
 }
 
 func TestEngineFailureError(t *testing.T) {
-	const image = "ghcr.io/qosi/agentbox:latest"
+	const image = "ghcr.io/qosikz/agentbox:latest"
 	tests := []struct {
 		name     string
 		engine   string
@@ -395,8 +395,8 @@ func TestEngineFailureError(t *testing.T) {
 		{"exit 1 agent failure", "docker", 1, "test suite failed", false},
 		{"exit 126 not executable", "docker", 126, "permission denied", false},
 		{"exit 127 command not found", "podman", 127, "agent-cli: not found", false},
-		{"exit 125 docker engine failure", "docker", 125, "Unable to find image 'ghcr.io/qosi/agentbox:latest' locally", true},
-		{"exit 125 podman engine failure", "podman", 125, "Error: ghcr.io/qosi/agentbox:latest: image not known", true},
+		{"exit 125 docker engine failure", "docker", 125, "Unable to find image 'ghcr.io/qosikz/agentbox:latest' locally", true},
+		{"exit 125 podman engine failure", "podman", 125, "Error: ghcr.io/qosikz/agentbox:latest: image not known", true},
 		{"exit 125 daemon failure", "docker", 125, "docker: Error response from daemon: something broke", true},
 		// 125 WITHOUT a recognizable engine marker is the agent's own exit code
 		// inside a working container: not an engine failure.

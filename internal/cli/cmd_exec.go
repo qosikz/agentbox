@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/qosi/agentbox/internal/config"
-	"github.com/qosi/agentbox/internal/git"
-	"github.com/qosi/agentbox/internal/policy"
-	"github.com/qosi/agentbox/internal/runtime"
-	"github.com/qosi/agentbox/internal/session"
-	"github.com/qosi/agentbox/internal/workspace"
+	"github.com/qosikz/agentbox/internal/config"
+	"github.com/qosikz/agentbox/internal/git"
+	"github.com/qosikz/agentbox/internal/policy"
+	"github.com/qosikz/agentbox/internal/runtime"
+	"github.com/qosikz/agentbox/internal/session"
+	"github.com/qosikz/agentbox/internal/workspace"
 )
 
 // cmdExec runs an arbitrary command inside an isolated, policy-controlled

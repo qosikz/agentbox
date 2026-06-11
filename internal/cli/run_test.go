@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qosi/agentbox/internal/config"
-	"github.com/qosi/agentbox/internal/session"
+	"github.com/qosikz/agentbox/internal/config"
+	"github.com/qosikz/agentbox/internal/session"
 )
 
 // chdir changes into dir for the duration of the test (Go 1.23 compatible;

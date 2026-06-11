@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qosi/agentbox/internal/config"
-	"github.com/qosi/agentbox/internal/policy"
-	"github.com/qosi/agentbox/internal/runtime"
-	"github.com/qosi/agentbox/internal/session"
-	"github.com/qosi/agentbox/internal/workspace"
+	"github.com/qosikz/agentbox/internal/config"
+	"github.com/qosikz/agentbox/internal/policy"
+	"github.com/qosikz/agentbox/internal/runtime"
+	"github.com/qosikz/agentbox/internal/session"
+	"github.com/qosikz/agentbox/internal/workspace"
 )
 
 // These tests map to the required security acceptance tests in

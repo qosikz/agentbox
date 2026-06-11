@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/qosi/agentbox/internal/config"
+	"github.com/qosikz/agentbox/internal/config"
 )
 
 // SupportedNames lists the adapter names Get understands, sorted.

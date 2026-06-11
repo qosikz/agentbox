@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/qosi/agentbox/internal/session"
+	"github.com/qosikz/agentbox/internal/session"
 )
 
 func (r *Root) cmdSession(args []string) error {

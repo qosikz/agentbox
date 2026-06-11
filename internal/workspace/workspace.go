@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/qosi/agentbox/internal/policy"
+	"github.com/qosikz/agentbox/internal/policy"
 )
 
 // skipDirs are repository-internal directories never copied into a workspace:

@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/qosi/agentbox/internal/config"
+	"github.com/qosikz/agentbox/internal/config"
 )
 
 // mandatoryDenies are always merged into filesystem.deny. The home-directory

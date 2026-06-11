@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/qosi/agentbox/internal/skill"
+	"github.com/qosikz/agentbox/internal/skill"
 )
 
 func (r *Root) cmdSkill(args []string) error {

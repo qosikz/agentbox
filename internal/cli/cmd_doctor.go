@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"runtime"
 
-	"github.com/qosi/agentbox/internal/config"
+	"github.com/qosikz/agentbox/internal/config"
 )
 
 type doctorCheck struct {

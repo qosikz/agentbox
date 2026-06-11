@@ -101,14 +101,14 @@ it is honest about what it does and does not enforce.
 **Prebuilt binaries:**
 
 Download the binary for your platform from
-[GitHub Releases](https://github.com/qosi/agentbox/releases) (published for
+[GitHub Releases](https://github.com/qosikz/agentbox/releases) (published for
 every `v*` tag; `checksums.txt` carries SHA-256 sums), make it executable, and
 put it on your `PATH`.
 
 **From source:**
 
 ```bash
-git clone https://github.com/qosi/agentbox.git
+git clone https://github.com/qosikz/agentbox.git
 cd agentbox
 make build        # produces ./bin/agentbox with embedded version/commit/date
 ./bin/agentbox version
@@ -117,7 +117,7 @@ make build        # produces ./bin/agentbox with embedded version/commit/date
 **With `go install`:**
 
 ```bash
-go install github.com/qosi/agentbox/cmd/agentbox@latest
+go install github.com/qosikz/agentbox/cmd/agentbox@latest
 ```
 
 Building from source requires Go 1.23+. Docker or Podman is optional and only

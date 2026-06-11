@@ -4,6 +4,14 @@ All notable changes to AgentBox are documented here.
 
 ## Unreleased
 
+### Changed
+- **Module path renamed** `github.com/qosi/agentbox` → `github.com/qosikz/agentbox`
+  to match the public home (the QOSI organization at github.com/qosikz). This
+  updates `go.mod`, every import, the `ghcr.io/.../agentbox` test fixtures, and
+  the README install/clone/`go install` URLs, so `go install
+  github.com/qosikz/agentbox/cmd/agentbox@latest` resolves once the repo is
+  public. No runtime behavior change.
+
 ### Documentation
 - README: added an "Add AgentBox to your agent harness" quickstart near the top
   (copy-paste `skill install` + `exec` + the MCP one-liner) so harness users can

@@ -35,7 +35,7 @@ runs:
       run: |
         # During the preview the module is unpublished, so build from this repo.
         # Once published you can replace this with:
-        #   go install github.com/qosi/agentbox/cmd/agentbox@latest
+        #   go install github.com/qosikz/agentbox/cmd/agentbox@latest
         go build -o "$RUNNER_TEMP/agentbox" ./cmd/agentbox
 
     - name: Run AgentBox
