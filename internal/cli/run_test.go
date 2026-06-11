@@ -130,14 +130,14 @@ func TestRunInvalidPolicyExit7(t *testing.T) {
 }
 
 func TestParseRunFlags(t *testing.T) {
-	o, err := parseRunFlags([]string{"fix tests", "--agent", "aider", "--write", "./a", "--write=./b", "--dry-run", "--network=open"})
+	o, err := parseRunFlags([]string{"fix tests", "--agent", "codex", "--write", "./a", "--write=./b", "--dry-run", "--network=open"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if o.task != "fix tests" {
 		t.Errorf("task=%q", o.task)
 	}
-	if o.agent != "aider" {
+	if o.agent != "codex" {
 		t.Errorf("agent=%q", o.agent)
 	}
 	if len(o.write) != 2 || o.write[0] != "./a" || o.write[1] != "./b" {

@@ -72,7 +72,7 @@ P0:
 
 P1:
 
-- Aider adapter
+- Harness integration (exec / MCP server / skill)
 - GitHub PR creation
 - GitHub Action
 - Podman support

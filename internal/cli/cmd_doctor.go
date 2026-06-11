@@ -43,7 +43,7 @@ func (r *Root) cmdDoctor(args []string) error {
 	}
 
 	// Known agent CLIs.
-	for _, bin := range []string{"aider", "claude", "codex"} {
+	for _, bin := range []string{"claude", "codex", "gemini", "goose", "opencode"} {
 		if path, err := exec.LookPath(bin); err == nil {
 			checks = append(checks, doctorCheck{"agent:" + bin, true, path})
 		} else {

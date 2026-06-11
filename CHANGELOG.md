@@ -2,6 +2,22 @@
 
 All notable changes to AgentBox are documented here.
 
+## v0.3.1 — 2026-06-11 (harness-focused)
+
+### Removed
+- The `aider` adapter. Aider's upstream activity has stalled (last release
+  2025-08); AgentBox now focuses on actively-maintained harnesses and the
+  `custom` adapter, which runs any CLI agent. `agent: aider` is no longer a
+  valid adapter name — use `custom` with `agent.custom.command: aider` if you
+  still need it.
+
+### Changed
+- Documentation and positioning lead with **harness integration** — driving
+  AgentBox from Claude Code, OpenClaw, Hermes Agent, or any MCP/skill-capable
+  harness (via `exec` / `mcp serve` / `skill`) — and with the `custom` adapter
+  as the bring-your-own-agent path. `agentbox doctor` now probes
+  claude/codex/gemini/goose/opencode instead of aider.
+
 ## v0.3.0 — 2026-06-11 (containerized agents)
 
 Run a coding agent fully inside the sandbox: bake its CLI into a runtime image

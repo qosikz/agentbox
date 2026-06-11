@@ -16,12 +16,6 @@ func TestCustomAdapterName(t *testing.T) {
 	}
 }
 
-func TestAiderAdapterName(t *testing.T) {
-	if got := (AiderAdapter{}).Name(); got != "aider" {
-		t.Fatalf("Name() = %q, want %q", got, "aider")
-	}
-}
-
 func TestNewAdapterNames(t *testing.T) {
 	tests := []struct {
 		adapter Adapter
@@ -108,33 +102,6 @@ func TestCustomAdapterBuildCommandDoesNotMutateInputArgs(t *testing.T) {
 	}
 	if original[1] != "{{ task }}" {
 		t.Errorf("input Args mutated: got %q", original[1])
-	}
-}
-
-func TestAiderAdapterBuildCommand(t *testing.T) {
-	a := AiderAdapter{}
-	input := Input{
-		Task:          "refactor",
-		WorkspacePath: "/repo",
-		Env:           map[string]string{"K": "V"},
-		ExtraArgs:     []string{"--yes"},
-	}
-	cmd, err := a.BuildCommand(context.Background(), input)
-	if err != nil {
-		t.Fatalf("BuildCommand() error = %v", err)
-	}
-	if cmd.Executable != "aider" {
-		t.Errorf("Executable = %q, want %q", cmd.Executable, "aider")
-	}
-	wantArgs := []string{"--message", "refactor", "--yes"}
-	if !reflect.DeepEqual(cmd.Args, wantArgs) {
-		t.Errorf("Args = %#v, want %#v", cmd.Args, wantArgs)
-	}
-	if cmd.WorkingDir != input.WorkspacePath {
-		t.Errorf("WorkingDir = %q, want %q", cmd.WorkingDir, input.WorkspacePath)
-	}
-	if !reflect.DeepEqual(cmd.Env, input.Env) {
-		t.Errorf("Env = %#v, want %#v", cmd.Env, input.Env)
 	}
 }
 
@@ -308,15 +275,6 @@ func TestGet(t *testing.T) {
 			},
 		},
 		{
-			name:      "aider",
-			agentName: "aider",
-			check: func(t *testing.T, a Adapter) {
-				if _, ok := a.(AiderAdapter); !ok {
-					t.Fatalf("Get returned %T, want AiderAdapter", a)
-				}
-			},
-		},
-		{
 			name:      "claude",
 			agentName: "claude",
 			check: func(t *testing.T, a Adapter) {
@@ -410,7 +368,7 @@ func TestGetResolvesAllSupportedNames(t *testing.T) {
 }
 
 func TestSupportedNames(t *testing.T) {
-	want := []string{"aider", "claude", "codex", "custom", "gemini", "goose", "opencode"}
+	want := []string{"claude", "codex", "custom", "gemini", "goose", "opencode"}
 	if got := SupportedNames(); !reflect.DeepEqual(got, want) {
 		t.Errorf("SupportedNames() = %#v, want %#v", got, want)
 	}
@@ -439,17 +397,6 @@ func TestCustomAdapterCheckPresent(t *testing.T) {
 func TestCustomAdapterCheckEmptyCommand(t *testing.T) {
 	if err := (CustomAdapter{}).Check(context.Background()); err == nil {
 		t.Fatal("Check() error = nil, want error for empty command")
-	}
-}
-
-func TestAiderAdapterCheck(t *testing.T) {
-	// Aider is an external binary; only assert the failure path when it is
-	// absent, otherwise skip so the suite stays offline and deterministic.
-	if _, err := exec.LookPath("aider"); err == nil {
-		t.Skip("aider is installed; skipping missing-binary assertion")
-	}
-	if err := (AiderAdapter{}).Check(context.Background()); err == nil {
-		t.Fatal("Check() error = nil, want error when aider is absent")
 	}
 }
 

@@ -50,7 +50,7 @@ func containsSubstr(args []string, sub string) bool {
 }
 
 func TestBuildDockerArgs_SecureDefaults(t *testing.T) {
-	args := BuildDockerArgs(secureSpec(), CommandSpec{Executable: "aider", Args: []string{"--help"}})
+	args := BuildDockerArgs(secureSpec(), CommandSpec{Executable: "agent-cli", Args: []string{"--help"}})
 
 	if len(args) < 2 || args[0] != "run" || args[1] != "--rm" {
 		t.Fatalf("expected args to start with [run --rm], got %v", args)
@@ -78,8 +78,8 @@ func TestBuildDockerArgs_SecureDefaults(t *testing.T) {
 	if args[len(args)-3] != "ghcr.io/qosi/agentbox:latest" {
 		t.Errorf("expected image before executable, got %v", args)
 	}
-	if args[len(args)-2] != "aider" || args[len(args)-1] != "--help" {
-		t.Errorf("expected exec [aider --help] at end, got %v", args)
+	if args[len(args)-2] != "agent-cli" || args[len(args)-1] != "--help" {
+		t.Errorf("expected exec [agent-cli --help] at end, got %v", args)
 	}
 }
 
@@ -242,7 +242,7 @@ func TestDryRunRunner_Run(t *testing.T) {
 	const secretVal = "sk-super-secret-value"
 	spec.Env = map[string]string{"OPENAI_API_KEY": secretVal}
 	cmd := CommandSpec{
-		Executable: "aider",
+		Executable: "agent-cli",
 		Args:       []string{"--model", "gpt-4o"},
 		Env:        map[string]string{"ANTHROPIC_API_KEY": "another-secret"},
 	}
@@ -278,7 +278,7 @@ func TestDryRunRunner_Run(t *testing.T) {
 		t.Errorf("expected command env key listed, got:\n%s", joined)
 	}
 	// Exec line should reflect the command.
-	if !strings.Contains(joined, "exec: aider --model gpt-4o") {
+	if !strings.Contains(joined, "exec: agent-cli --model gpt-4o") {
 		t.Errorf("expected exec line, got:\n%s", joined)
 	}
 }
@@ -394,7 +394,7 @@ func TestEngineFailureError(t *testing.T) {
 		{"exit 0 success", "docker", 0, "", false},
 		{"exit 1 agent failure", "docker", 1, "test suite failed", false},
 		{"exit 126 not executable", "docker", 126, "permission denied", false},
-		{"exit 127 command not found", "podman", 127, "aider: not found", false},
+		{"exit 127 command not found", "podman", 127, "agent-cli: not found", false},
 		{"exit 125 docker engine failure", "docker", 125, "Unable to find image 'ghcr.io/qosi/agentbox:latest' locally", true},
 		{"exit 125 podman engine failure", "podman", 125, "Error: ghcr.io/qosi/agentbox:latest: image not known", true},
 		{"exit 125 daemon failure", "docker", 125, "docker: Error response from daemon: something broke", true},

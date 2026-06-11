@@ -1,11 +1,19 @@
 # AgentBox
 
-**Safe workspaces for AI coding agents.**
+**Safe workspaces for AI coding agents — and a sandbox your agent harness can drive.**
 
-AgentBox runs AI coding agents (Aider, Claude Code, Codex, custom shell agents, …)
-in isolated, reproducible, policy-controlled workspaces — so an agent can edit a
-real repository without uncontrolled access to your secrets, network, host
-filesystem, or MCP tools. Every run leaves behind an auditable session record.
+AgentBox runs AI coding agents (Claude Code, Codex, Gemini, Goose, OpenCode, or
+**any custom shell agent**) in isolated, reproducible, policy-controlled
+workspaces — so an agent can edit a real repository without uncontrolled access
+to your secrets, network, host filesystem, or MCP tools. Every run leaves an
+auditable session record.
+
+It works in **both directions**: point AgentBox at an agent, **or** let an agent
+harness — Claude Code, [OpenClaw](#use-agentbox-from-your-agent-harness-integration),
+Hermes Agent, or any MCP/skill-capable harness — call AgentBox as its *safety
+sandbox* to test risky commands, validate generated code, and vet new tools or
+subagents before trusting them. Via `agentbox exec`, an MCP server, or a
+cross-harness skill.
 
 ```bash
 agentbox run "fix failing tests"
@@ -28,9 +36,11 @@ Policy: agentbox.yaml
 ✓ Session saved
 ```
 
-> **Status: production preview (v0.1.0).** Dry-run, sessions, policy, MCP
-> scanning, and real container execution (Docker or Podman) are supported. Real
-> runs require a runtime image you provide (see [Runtime image](#runtime-image)).
+> **Status: active development (v0.3.0).** Dry-run, sessions, policy, MCP
+> scanning, real container execution (Docker or Podman), harness integration
+> (`exec` / `mcp serve` / `skill`), and baked-in containerized agents are
+> supported. Real runs require a runtime image you provide (see
+> [Runtime image](#runtime-image)).
 
 ## Why
 
@@ -126,7 +136,7 @@ Most commands support `--json`. Exit codes follow
 
 ```text
 --dry-run                 Plan only; do not execute the agent (no Docker required)
---agent <name>            custom | claude | codex | gemini | goose | opencode | aider
+--agent <name>            custom | claude | codex | gemini | goose | opencode
 --policy <file>           Policy file (default: agentbox.yaml)
 --network deny|allowlist|open
 --engine docker|podman    Container engine (default: policy runtime.engine)
@@ -143,8 +153,10 @@ Most commands support `--json`. Exit codes follow
 agentbox run "fix the failing test" --agent claude --runtime local --yes-unsafe --commit
 ```
 
-Built-in adapters: `custom`, `claude`, `codex`, `gemini`, `goose`, `opencode`
-(plus `aider`, community-maintained). AgentBox runs the agent in a disposable
+Built-in adapters: `custom`, `claude`, `codex`, `gemini`, `goose`, `opencode`.
+The `custom` adapter runs **any** CLI agent — point `agent.custom.command` at
+your binary and AgentBox substitutes the task into `{{ task }}`, so you are
+never limited to the built-ins. AgentBox runs the agent in a disposable
 workspace copy, re-runs your test commands, captures the diff, and (with
 `--commit`) propagates the branch back into your repository. Local mode
 forwards only `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL`, `TERM`, and
@@ -195,11 +207,21 @@ See [examples/agents/README.md](examples/agents/README.md) for the full guide.
 
 ## Use AgentBox FROM your agent (harness integration)
 
-The inverse direction is just as useful: an agent harness running on your
-machine — Claude Code, OpenClaw, Hermes Agent, Codex CLI, Gemini CLI, Goose,
-OpenCode — can use AgentBox as its **safety sandbox**: try risky commands,
-validate generated code or a new tool/subagent before trusting it, and vet MCP
-servers, with every experiment recorded as an auditable session.
+This is where AgentBox shines. An agent harness on your machine — **Claude
+Code, OpenClaw, Hermes Agent**, Codex CLI, Gemini CLI, Goose, OpenCode, or
+anything that speaks MCP or reads markdown skills — can call AgentBox as its
+**safety sandbox**. The harness *is* the agent; AgentBox is the blast shield
+around whatever it wants to try:
+
+- **Test a new subagent or tool** before trusting it in the real workspace.
+- **Run generated code / risky commands** (migrations, installs, `rm`) and read
+  the exit code, diff, and output back — without touching the host.
+- **Vet an MCP server** for dangerous capabilities before wiring it in.
+
+Every experiment is isolated, policy-controlled, secret-redacted, and recorded
+as an auditable session. Unsafe modes are **not** reachable through these
+surfaces, so a harness can never escalate past your `agentbox.yaml`. Three ways
+to wire it in:
 
 **1. The sandbox primitive** — `agentbox exec` runs any command in an isolated
 workspace and passes the command's exit code through:
@@ -227,9 +249,6 @@ openclaw mcp add agentbox --command agentbox --arg mcp --arg serve
 codex mcp add agentbox -- agentbox mcp serve
 gemini mcp add agentbox agentbox mcp serve
 ```
-
-Unsafe modes are **not** reachable through the MCP server or the skill: a
-harness can never silently escalate past your `agentbox.yaml` policy.
 
 ## Policy
 

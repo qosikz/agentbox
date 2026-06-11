@@ -6,7 +6,7 @@ inputs:
     description: Task for the agent.
     required: true
   agent:
-    description: Adapter to use (custom, aider).
+    description: Adapter to use (custom, claude, codex, gemini, goose, opencode).
     required: false
     default: custom
   policy:
