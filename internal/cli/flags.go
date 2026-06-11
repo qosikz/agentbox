@@ -102,13 +102,23 @@ func parseRunFlags(args []string) (runOptions, error) {
 }
 
 // looksLikeRepo reports whether s is a git repository reference rather than a
-// task string.
+// task string or a local path.
 func looksLikeRepo(s string) bool {
+	// Task strings contain spaces; repository references never do.
+	if strings.ContainsAny(s, " \t") {
+		return false
+	}
 	if strings.HasPrefix(s, "git@") || strings.Contains(s, "://") {
 		return true
 	}
+	// Local paths are not remote repositories.
+	if strings.HasPrefix(s, ".") || strings.HasPrefix(s, "/") || strings.HasPrefix(s, "~") {
+		return false
+	}
+	// host/owner[/...] where the host segment looks like a DNS name.
 	parts := strings.SplitN(s, "/", 2)
-	return len(parts) == 2 && strings.Contains(parts[0], ".") && parts[1] != ""
+	host := parts[0]
+	return len(parts) == 2 && parts[1] != "" && strings.Contains(host, ".") && !strings.Contains(host, "..")
 }
 
 // hasFlag reports whether --name appears in args.

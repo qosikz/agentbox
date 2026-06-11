@@ -70,6 +70,17 @@ var rules = []rule{
 		re:       regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE|DROP)\b`),
 	},
 
+	// mcp.git.broad_permissions (Medium): git/GitHub operations that can push,
+	// force-push, or alter repository state with broad permissions.
+	{
+		severity: Medium,
+		id:       "mcp.git.broad_permissions",
+		message:  "broad git/GitHub write permissions",
+		re: regexp.MustCompile(
+			`git\s+push|--force\b|git\s+remote\s+add|GITHUB_TOKEN|gh\s+(repo|pr|api)\b|push_to_repo|create_or_update_file`,
+		),
+	},
+
 	// mcp.prompt_injection.surface (Low): tool/description text that smells like
 	// a prompt-injection payload.
 	{

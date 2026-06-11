@@ -68,7 +68,13 @@ func errMsg(err error) string {
 // Diff returns the working-tree diff against HEAD. If the repository has no
 // commits yet (no HEAD), it falls back to a plain diff. Empty output is valid
 // and is not an error.
+//
+// Untracked (e.g. agent-created) files are included: they are marked
+// intent-to-add first so they appear in the diff as new files. This mutates the
+// index only with intent-to-add markers, which is safe in AgentBox's disposable
+// workspace copy. Best-effort: a failure here does not fail the diff.
 func (r *Repo) Diff(ctx context.Context) ([]byte, error) {
+	_, _ = run(ctx, "-C", r.Dir, "add", "-N", ".")
 	out, err := run(ctx, "-C", r.Dir, "diff", "--no-color", "HEAD")
 	if err != nil {
 		// No HEAD yet (unborn branch / empty repo): fall back to a diff of the

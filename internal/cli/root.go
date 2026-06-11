@@ -46,6 +46,8 @@ func (r *Root) Run(args []string) error {
 		return r.cmdSession(args[1:])
 	case "mcp":
 		return r.cmdMCP(args[1:])
+	case "shell":
+		return codedf(ExitGeneral, "agentbox shell is not implemented in the MVP.\nUse 'agentbox run \"<task>\"' to run an agent in a workspace.")
 	default:
 		return codedf(ExitGeneral, "unknown command: %s\n\nRun 'agentbox help' to see available commands.", args[0])
 	}

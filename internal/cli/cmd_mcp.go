@@ -36,7 +36,9 @@ func mcpScan(args []string) error {
 	if target == "" {
 		return codedf(ExitGeneral, "usage: agentbox mcp scan <path> [--json]")
 	}
-	if looksLikeRepo(target) {
+	// Prefer a local path: only reject as "remote" when the target does not
+	// exist on disk and looks like a remote repository reference.
+	if _, statErr := os.Stat(target); statErr != nil && looksLikeRepo(target) {
 		return codedf(ExitGeneral, "remote MCP scanning is not supported yet.\nClone the server locally and scan the path:\n  git clone %s && agentbox mcp scan ./<dir>", target)
 	}
 
