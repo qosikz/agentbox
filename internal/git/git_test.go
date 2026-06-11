@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -304,5 +305,30 @@ func TestPushBranchEmptyName(t *testing.T) {
 	r := &Repo{Dir: "."}
 	if err := r.PushBranch(context.Background(), "origin", ""); err == nil {
 		t.Fatal("empty branch name should error")
+	}
+}
+
+// TestCommitWithoutIdentityFallsBack reproduces a fresh CI runner: no global,
+// system, or repo-local git identity. Commit must succeed via the AgentBox
+// fallback identity rather than fail with "Author identity unknown".
+func TestCommitWithoutIdentityFallsBack(t *testing.T) {
+	gitOrSkip(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	repo := newTempRepo(t) // helper commits use per-command -c identity flags
+
+	if err := os.WriteFile(filepath.Join(repo, "new.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &Repo{Dir: repo}
+	if err := r.Commit(context.Background(), "agentbox: test"); err != nil {
+		t.Fatalf("Commit without identity should fall back, got: %v", err)
+	}
+	out, err := exec.Command("git", "-C", repo, "log", "-1", "--format=%ae").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(out); !strings.Contains(got, "agentbox@localhost") {
+		t.Errorf("fallback committer = %q, want agentbox@localhost", got)
 	}
 }

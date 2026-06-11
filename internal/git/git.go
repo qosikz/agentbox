@@ -195,6 +195,10 @@ func (r *Repo) CreateBranch(ctx context.Context, name string) error {
 
 // Commit stages all changes and records a commit. If there is nothing to
 // commit it returns a clear error so the caller can decide how to react.
+//
+// When the repository has no committer identity configured (common on fresh
+// CI runners), the commit is recorded under a neutral AgentBox identity
+// instead of failing — the alternative is silently losing the agent's work.
 func (r *Repo) Commit(ctx context.Context, message string) error {
 	if _, err := run(ctx, "-C", r.Dir, "add", "-A"); err != nil {
 		return err
@@ -208,10 +212,22 @@ func (r *Repo) Commit(ctx context.Context, message string) error {
 	if len(files) == 0 {
 		return fmt.Errorf("commit %q: nothing to commit; the working tree is clean (stage changes before committing)", message)
 	}
-	if _, err := run(ctx, "-C", r.Dir, "commit", "-m", message); err != nil {
+	args := []string{"-C", r.Dir}
+	if !r.hasIdentity(ctx) {
+		args = append(args, "-c", "user.name=AgentBox", "-c", "user.email=agentbox@localhost")
+	}
+	args = append(args, "commit", "-m", message)
+	if _, err := run(ctx, args...); err != nil {
 		return err
 	}
 	return nil
+}
+
+// hasIdentity reports whether a committer identity is configured for the
+// repository (local, global, or system scope).
+func (r *Repo) hasIdentity(ctx context.Context) bool {
+	out, err := run(ctx, "-C", r.Dir, "config", "user.email")
+	return err == nil && strings.TrimSpace(string(out)) != ""
 }
 
 // FetchBranch copies branch from the repository at fromDir into the repository

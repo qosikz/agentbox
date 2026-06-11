@@ -228,6 +228,10 @@ func TestRunCommitSurvivesCleanup(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
+	// Hermetic git environment: no host/global identity, like a CI runner.
+	// The commit must still succeed via the AgentBox fallback identity.
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
 	dir := t.TempDir()
 	gitc := func(args ...string) {
 		t.Helper()
