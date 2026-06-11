@@ -23,8 +23,10 @@ import (
 
 // minimalSafeEnv are the only host variables passed to an agent running in
 // unsafe LOCAL mode, in addition to explicitly allowlisted secrets. No other
-// host environment is forwarded.
-var minimalSafeEnv = []string{"PATH", "HOME", "LANG", "LC_ALL", "TERM"}
+// host environment is forwarded. USER/LOGNAME are included because they are
+// non-sensitive and required by OS keychains (e.g. Claude Code's macOS auth)
+// and git's identity fallback; without them real agents fail to authenticate.
+var minimalSafeEnv = []string{"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM"}
 
 // containerPATH is the standard Linux PATH set inside containers. The host's
 // PATH (and HOME) must never leak into a container: they are host-specific,

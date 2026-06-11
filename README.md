@@ -134,6 +134,28 @@ Most commands support `--json`. Exit codes follow
 --yes-unsafe              Acknowledge unsafe mode non-interactively (CI)
 ```
 
+### Example: a real agent (Claude Code)
+
+```yaml
+agent:
+  default: custom
+  custom:
+    command: claude
+    args: ["-p", "--permission-mode", "acceptEdits", "{{ task }}"]
+```
+
+```bash
+agentbox run "fix the failing test" --runtime local --yes-unsafe --commit
+```
+
+AgentBox runs the agent in a disposable workspace copy, re-runs your test
+commands, captures the diff, and (with `--commit`) propagates the branch back
+into your repository. Local mode forwards only `PATH`, `HOME`, `USER`,
+`LOGNAME`, `LANG`, `LC_ALL`, `TERM`, and explicitly allowlisted secrets.
+For container runs the agent CLI must exist in your runtime image and its API
+key must be allowlisted in `secrets.allow`; keychain/OAuth logins (like
+`claude`'s) only work in local mode.
+
 ## Policy
 
 `agentbox init` writes a commented `agentbox.yaml` with secure defaults. See

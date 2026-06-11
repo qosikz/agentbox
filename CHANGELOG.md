@@ -2,6 +2,20 @@
 
 All notable changes to AgentBox are documented here.
 
+## Unreleased
+
+### Fixed
+- Local (unsafe) runs now forward `USER`/`LOGNAME` to the agent. OS keychains
+  (e.g. Claude Code's macOS auth) and git's identity fallback require them;
+  without them real agents failed to authenticate ("Not logged in").
+  Containers still never receive the host `USER`.
+
+### Verified
+- End-to-end run with a real coding agent: Claude Code (`claude -p
+  --permission-mode acceptEdits` via the custom adapter) fixed a failing Go
+  test under AgentBox — tests re-run green, diff captured, branch committed
+  and propagated, session recorded, workspace cleaned.
+
 ## v0.1.0 — 2026-06-11 (production preview)
 
 ### Added

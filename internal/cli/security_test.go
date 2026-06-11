@@ -146,8 +146,19 @@ func TestContainerEnvExcludesHostPathAndHome(t *testing.T) {
 
 	// Local (unsafe) runs do need the host PATH to function.
 	epLocal := policy.BuildEffectivePolicy(config.DefaultPolicy(), "", policy.Overrides{Runtime: "local"})
-	if got := buildAgentEnv(epLocal)["PATH"]; got != hostPath {
+	localEnv := buildAgentEnv(epLocal)
+	if got := localEnv["PATH"]; got != hostPath {
 		t.Errorf("local-run PATH = %q, want host PATH", got)
+	}
+	// USER must be forwarded in local mode: OS keychains (e.g. Claude Code's
+	// macOS auth) and git identity fallback fail without it. Regression for a
+	// real-agent run that died with "Not logged in".
+	if hostUser := os.Getenv("USER"); hostUser != "" && localEnv["USER"] != hostUser {
+		t.Errorf("local-run USER = %q, want host USER %q", localEnv["USER"], hostUser)
+	}
+	// Containers must still NOT get the host USER.
+	if _, hasUser := env["USER"]; hasUser {
+		t.Error("container env must not contain host USER")
 	}
 }
 
