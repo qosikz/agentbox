@@ -227,7 +227,10 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 			repo, _ = git.Open(execRoot)
 			// Record the pre-existing dirty state so we attribute only the
 			// agent's changes, not files already modified in the source repo.
+			// Normalize untracked entries to file granularity (matching the
+			// post-run diff) so pre-existing untracked dirs are excluded.
 			if repo != nil {
+				repo.MarkIntentToAdd(ctx)
 				if files, ferr := repo.ChangedFiles(ctx); ferr == nil {
 					baselineChanged = toSet(files)
 				}

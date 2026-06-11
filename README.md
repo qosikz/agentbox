@@ -110,8 +110,11 @@ agentbox mcp scan ./path-to-mcp-server
 |---|---|
 | `agentbox init` | Create `agentbox.yaml` and `.agentbox/` |
 | `agentbox run "<task>"` | Run an agent in an isolated, policy-controlled workspace |
+| `agentbox exec "<command>"` | Run a command in an isolated workspace (exit code passes through) |
 | `agentbox policy check [--json]` | Validate policy; show effective config, unsafe options, honest limitations |
 | `agentbox mcp scan <path> [--json]` | Statically scan an MCP server (exit 2 if unsafe) |
+| `agentbox mcp serve` | Serve sandbox tools over MCP (stdio) to agent harnesses |
+| `agentbox skill install` | Install the AgentBox skill into a harness (Claude Code, OpenClaw, Hermes, …) |
 | `agentbox session list / show [id] / replay [id]` | Inspect recorded sessions |
 | `agentbox doctor` | Diagnose local setup |
 | `agentbox version` | Print version |
@@ -123,7 +126,7 @@ Most commands support `--json`. Exit codes follow
 
 ```text
 --dry-run                 Plan only; do not execute the agent (no Docker required)
---agent <name>            custom | aider
+--agent <name>            custom | claude | codex | gemini | goose | opencode | aider
 --policy <file>           Policy file (default: agentbox.yaml)
 --network deny|allowlist|open
 --engine docker|podman    Container engine (default: policy runtime.engine)
@@ -136,25 +139,56 @@ Most commands support `--json`. Exit codes follow
 
 ### Example: a real agent (Claude Code)
 
-```yaml
-agent:
-  default: custom
-  custom:
-    command: claude
-    args: ["-p", "--permission-mode", "acceptEdits", "{{ task }}"]
+```bash
+agentbox run "fix the failing test" --agent claude --runtime local --yes-unsafe --commit
 ```
+
+Built-in adapters: `custom`, `claude`, `codex`, `gemini`, `goose`, `opencode`
+(plus `aider`, community-maintained). AgentBox runs the agent in a disposable
+workspace copy, re-runs your test commands, captures the diff, and (with
+`--commit`) propagates the branch back into your repository. Local mode
+forwards only `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL`, `TERM`, and
+explicitly allowlisted secrets. For container runs the agent CLI must exist in
+your runtime image and its API key must be allowlisted in `secrets.allow`;
+keychain/OAuth logins (like `claude`'s) only work in local mode.
+
+## Use AgentBox FROM your agent (harness integration)
+
+The inverse direction is just as useful: an agent harness running on your
+machine — Claude Code, OpenClaw, Hermes Agent, Codex CLI, Gemini CLI, Goose,
+OpenCode — can use AgentBox as its **safety sandbox**: try risky commands,
+validate generated code or a new tool/subagent before trusting it, and vet MCP
+servers, with every experiment recorded as an auditable session.
+
+**1. The sandbox primitive** — `agentbox exec` runs any command in an isolated
+workspace and passes the command's exit code through:
 
 ```bash
-agentbox run "fix the failing test" --runtime local --yes-unsafe --commit
+agentbox exec "go test ./..." --json     # exit_code, stdout, changed_files, session_dir
+agentbox exec --dry-run "rm -rf build"   # preview the sandbox without executing
 ```
 
-AgentBox runs the agent in a disposable workspace copy, re-runs your test
-commands, captures the diff, and (with `--commit`) propagates the branch back
-into your repository. Local mode forwards only `PATH`, `HOME`, `USER`,
-`LOGNAME`, `LANG`, `LC_ALL`, `TERM`, and explicitly allowlisted secrets.
-For container runs the agent CLI must exist in your runtime image and its API
-key must be allowlisted in `secrets.allow`; keychain/OAuth logins (like
-`claude`'s) only work in local mode.
+**2. The skill** — teach your harness when to reach for the sandbox:
+
+```bash
+agentbox skill install --target claude-project   # ./.claude/skills/ (this repo)
+agentbox skill install --target openclaw         # ~/.openclaw/workspace/skills/
+agentbox skill install --target hermes           # ~/.hermes/skills/
+agentbox skill install --target agents           # ~/.agents/skills/ (cross-agent standard)
+```
+
+**3. The MCP server** — structured tools (`sandbox_exec`, `sandbox_run`,
+`scan_mcp`, `session_list`, `session_show`) for any MCP-capable harness:
+
+```bash
+claude mcp add agentbox -- agentbox mcp serve
+openclaw mcp add agentbox --command agentbox --arg mcp --arg serve
+codex mcp add agentbox -- agentbox mcp serve
+gemini mcp add agentbox agentbox mcp serve
+```
+
+Unsafe modes are **not** reachable through the MCP server or the skill: a
+harness can never silently escalate past your `agentbox.yaml` policy.
 
 ## Policy
 

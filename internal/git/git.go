@@ -87,6 +87,16 @@ func (r *Repo) Diff(ctx context.Context) ([]byte, error) {
 	return out, nil
 }
 
+// MarkIntentToAdd records untracked files as intent-to-add ("git add -N .")
+// so that subsequent status/diff report them at FILE granularity. Without it,
+// "git status --porcelain" collapses a fully-untracked directory to the
+// directory path, while a post-Diff status (Diff runs add -N) reports the
+// individual files — a mismatch that breaks before/after change attribution.
+// Best-effort and safe in AgentBox's disposable workspace copy.
+func (r *Repo) MarkIntentToAdd(ctx context.Context) {
+	_, _ = run(ctx, "-C", r.Dir, "add", "-N", ".")
+}
+
 // ChangedFiles returns a sorted, de-duplicated list of paths reported by
 // "git status --porcelain".
 func (r *Repo) ChangedFiles(ctx context.Context) ([]string, error) {

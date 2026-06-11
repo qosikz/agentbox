@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,20 +9,34 @@ import (
 
 	"github.com/qosi/agentbox/internal/config"
 	"github.com/qosi/agentbox/internal/mcpguard"
+	"github.com/qosi/agentbox/internal/mcpserve"
 )
 
 func (r *Root) cmdMCP(args []string) error {
 	if len(args) == 0 {
-		return codedf(ExitGeneral, "usage: agentbox mcp <scan|list> [path] [--json]")
+		return codedf(ExitGeneral, "usage: agentbox mcp <scan|list|serve> [path] [--json]")
 	}
 	switch args[0] {
 	case "scan":
 		return mcpScan(args[1:])
 	case "list":
 		return mcpList(args[1:])
+	case "serve":
+		return r.mcpServe()
 	default:
 		return codedf(ExitGeneral, "unknown mcp command: %s", args[0])
 	}
+}
+
+// mcpServe runs the MCP stdio server until stdin closes. Only protocol
+// messages go to stdout; all diagnostics go to stderr.
+func (r *Root) mcpServe() error {
+	fmt.Fprintln(os.Stderr, "agentbox MCP server listening on stdio (policy: agentbox.yaml in CWD)")
+	srv := mcpserve.New(r.Version)
+	if err := srv.Serve(context.Background(), os.Stdin, os.Stdout); err != nil {
+		return coded(ExitGeneral, err)
+	}
+	return nil
 }
 
 func mcpScan(args []string) error {

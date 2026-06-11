@@ -42,10 +42,14 @@ func (r *Root) Run(args []string) error {
 		return r.cmdPolicy(args[1:])
 	case "run":
 		return r.cmdRun(ctx, args[1:])
+	case "exec":
+		return r.cmdExec(ctx, args[1:])
 	case "session":
 		return r.cmdSession(args[1:])
 	case "mcp":
 		return r.cmdMCP(args[1:])
+	case "skill":
+		return r.cmdSkill(args[1:])
 	case "shell":
 		return codedf(ExitGeneral, "agentbox shell is not implemented in the MVP.\nUse 'agentbox run \"<task>\"' to run an agent in a workspace.")
 	default:
@@ -72,8 +76,11 @@ Usage:
 Commands:
   init                       Create agentbox.yaml and .agentbox/
   run "<task>"               Run an agent in an isolated, policy-controlled workspace
+  exec "<command>"           Run a command in an isolated workspace (for agents/harnesses)
   policy check               Validate policy and show the effective configuration
   mcp scan <path>            Statically scan an MCP server for dangerous capabilities
+  mcp serve                  Serve AgentBox sandbox tools over MCP (stdio)
+  skill install              Install the AgentBox skill into an agent harness
   session list               List recorded sessions
   session show [id|latest]   Show a session record
   session replay [id|latest] Replay a session timeline, logs, and diff

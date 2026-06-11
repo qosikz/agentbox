@@ -2,7 +2,31 @@
 
 All notable changes to AgentBox are documented here.
 
-## Unreleased
+## v0.2.0 — 2026-06-11 (harness integration)
+
+AgentBox now works in BOTH directions: it sandboxes agents, and agent
+harnesses use it as their safety sandbox.
+
+### Added
+- `agentbox exec "<command>"` — run any command in an isolated, policy-
+  controlled workspace with no agent adapter: the calling harness IS the
+  agent. The sandboxed command's exit code passes through; `--json` returns
+  exit_code, redacted output, changed files, and the session path.
+- `agentbox mcp serve` — a stdio MCP server (protocol 2025-11-25, with
+  fallbacks) exposing `sandbox_exec`, `sandbox_run`, `scan_mcp`,
+  `session_list`, and `session_show` to any MCP-capable harness (Claude Code,
+  OpenClaw, Codex CLI, Gemini CLI, Goose, OpenCode). Unsafe modes are not
+  reachable through MCP tools.
+- `agentbox skill install` — installs a cross-harness SKILL.md
+  (agentskills.io-style) teaching the harness when to use the sandbox.
+  Targets: claude-project, claude-user, openclaw, hermes, agents
+  (~/.agents/skills), or `--dir`.
+- Built-in adapters for popular coding agents: `claude` (Claude Code,
+  `-p --permission-mode acceptEdits`), `codex` (`codex exec --sandbox
+  workspace-write`), `gemini` (`--approval-mode auto_edit -p`), `goose`
+  (`goose run --no-session -t` with `GOOSE_MODE=auto`), `opencode`
+  (`opencode run`). `aider` remains as a community adapter (upstream activity
+  has slowed; last release 2025-08).
 
 ### Fixed
 - Local (unsafe) runs now forward `USER`/`LOGNAME` to the agent. OS keychains
@@ -11,8 +35,7 @@ All notable changes to AgentBox are documented here.
   Containers still never receive the host `USER`.
 
 ### Verified
-- End-to-end run with a real coding agent: Claude Code (`claude -p
-  --permission-mode acceptEdits` via the custom adapter) fixed a failing Go
+- End-to-end run with a real coding agent: Claude Code fixed a failing Go
   test under AgentBox — tests re-run green, diff captured, branch committed
   and propagated, session recorded, workspace cleaned.
 
