@@ -36,11 +36,42 @@ Policy: agentbox.yaml
 ✓ Session saved
 ```
 
-> **Status: active development (v0.3.0).** Dry-run, sessions, policy, MCP
+> **Status: active development (v0.3.1).** Dry-run, sessions, policy, MCP
 > scanning, real container execution (Docker or Podman), harness integration
 > (`exec` / `mcp serve` / `skill`), and baked-in containerized agents are
 > supported. Real runs require a runtime image you provide (see
 > [Runtime image](#runtime-image)).
+
+## Add AgentBox to your agent harness
+
+Give your agent a sandbox in ~30 seconds. [Install AgentBox](#install), then
+drop the skill into the harness you use — it teaches the agent *when* to
+sandbox and *how* to call AgentBox:
+
+```bash
+agentbox skill install --target claude-project
+# targets: claude-project | claude-user | openclaw | hermes | agents
+```
+
+The harness discovers the `SKILL.md` automatically. Now the agent can run
+anything risky in an isolated container instead of on your host, and read the
+exit code, diff, and output back:
+
+```bash
+agentbox exec "npm install && npm test"   # host untouched; recorded as a session
+```
+
+Prefer structured tools over shell calls? Expose AgentBox over MCP instead:
+
+```bash
+claude mcp add agentbox -- agentbox mcp serve   # also: openclaw · codex · gemini
+```
+
+Works with Claude Code, **OpenClaw** (`~/.openclaw/workspace/skills`), **Hermes
+Agent** (`~/.hermes/skills`), and any agentskills.io-compatible harness
+(`~/.agents/skills`). Unsafe modes are never reachable through the skill or the
+MCP server, so a harness can't escalate past your `agentbox.yaml`.
+→ [Full guide](#use-agentbox-from-your-agent-harness-integration).
 
 ## Why
 

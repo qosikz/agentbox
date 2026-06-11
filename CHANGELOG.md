@@ -2,6 +2,13 @@
 
 All notable changes to AgentBox are documented here.
 
+## Unreleased
+
+### Documentation
+- README: added an "Add AgentBox to your agent harness" quickstart near the top
+  (copy-paste `skill install` + `exec` + the MCP one-liner) so harness users can
+  wire in the sandbox in ~30 seconds. Status bumped to v0.3.1.
+
 ## v0.3.1 — 2026-06-11 (harness-focused)
 
 ### Removed
