@@ -77,6 +77,18 @@ func TestUnsafeReasonsAndGating(t *testing.T) {
 	}
 }
 
+func TestEngineOverrideApplied(t *testing.T) {
+	cfg := config.DefaultPolicy()
+	ep := BuildEffectivePolicy(cfg, "", Overrides{Engine: "podman"})
+	if ep.Runtime.Engine != "podman" {
+		t.Errorf("engine = %q, want podman", ep.Runtime.Engine)
+	}
+	// Engine alone is not an unsafe option.
+	if ep.RequiresUnsafeConfirmation() {
+		t.Errorf("engine override should not be unsafe, reasons: %v", ep.UnsafeReasons())
+	}
+}
+
 func TestDefaultPolicyIsSafe(t *testing.T) {
 	ep := BuildEffectivePolicy(config.DefaultPolicy(), "", Overrides{})
 	if ep.RequiresUnsafeConfirmation() {

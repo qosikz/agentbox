@@ -28,9 +28,9 @@ Policy: agentbox.yaml
 ✓ Session saved
 ```
 
-> **Status: developer preview (MVP).** The fully-supported path today is
-> `--dry-run` plus the local/CI safety tooling. Real container execution works
-> but requires a runtime image you provide (see [Runtime image](#runtime-image)).
+> **Status: production preview (v0.1.0).** Dry-run, sessions, policy, MCP
+> scanning, and real container execution (Docker or Podman) are supported. Real
+> runs require a runtime image you provide (see [Runtime image](#runtime-image)).
 
 ## Why
 
@@ -39,12 +39,16 @@ call MCP tools. Run directly on your machine, they can leak `.env` files, SSH
 keys, and cloud credentials, reach any network endpoint, and run destructive
 commands. AgentBox puts deterministic guardrails around them:
 
-- **Secrets** — the host environment is never forwarded; only explicitly
-  allowlisted secrets are passed, and secret-shaped values are redacted from logs.
+- **Secrets** — the host environment (including `PATH` and `HOME`) is never
+  forwarded; containers get a standard `PATH`, `HOME` set to the workspace,
+  `LANG`/`TERM`, and explicitly allowlisted secrets only. Secret-shaped values
+  are redacted from logs.
 - **Filesystem** — sensitive paths (`.env`, `~/.ssh`, `~/.aws`, `~/.kube`, the
   Docker socket) are excluded from the workspace by default.
 - **Network** — denied by default; `open` requires explicit unsafe confirmation.
-- **Runtime** — non-root container, never privileged, never mounts the Docker socket.
+- **Runtime** — containers run as a non-root user with `--cap-drop ALL` and
+  `--security-opt no-new-privileges`; never privileged, never the Docker socket.
+  Works with Docker or Podman.
 - **MCP** — a static scanner flags dangerous MCP server capabilities before you trust them.
 - **Audit** — every run is recorded under `.agentbox/sessions/<id>/`.
 
@@ -53,12 +57,19 @@ it is honest about what it does and does not enforce.
 
 ## Install
 
-**From source (recommended during the preview):**
+**Prebuilt binaries:**
+
+Download the binary for your platform from
+[GitHub Releases](https://github.com/qosi/agentbox/releases) (published for
+every `v*` tag; `checksums.txt` carries SHA-256 sums), make it executable, and
+put it on your `PATH`.
+
+**From source:**
 
 ```bash
 git clone https://github.com/qosi/agentbox.git
 cd agentbox
-make build        # produces ./bin/agentbox
+make build        # produces ./bin/agentbox with embedded version/commit/date
 ./bin/agentbox version
 ```
 
@@ -68,8 +79,8 @@ make build        # produces ./bin/agentbox
 go install github.com/qosi/agentbox/cmd/agentbox@latest
 ```
 
-Requires Go 1.23+. Docker is optional and only needed for real (non-dry-run)
-container execution.
+Building from source requires Go 1.23+. Docker or Podman is optional and only
+needed for real (non-dry-run) container execution.
 
 ## Quickstart
 
@@ -115,6 +126,7 @@ Most commands support `--json`. Exit codes follow
 --agent <name>            custom | aider
 --policy <file>           Policy file (default: agentbox.yaml)
 --network deny|allowlist|open
+--engine docker|podman    Container engine (default: policy runtime.engine)
 --write <path>            Add a writable path (repeatable)
 --commit                  Commit the agent's changes on a new branch
 --open-pr                 Open a pull request (requires the gh CLI)
@@ -132,9 +144,20 @@ Key rules: deny overrides allow; sensitive paths are always denied unless you
 opt in with an explicit unsafe flag; the network defaults to `deny`; no secrets
 are passed unless named in `secrets.allow`.
 
+A few runtime knobs worth knowing:
+
+- `runtime.engine: docker | podman` selects the container engine (or use
+  `--engine` per run).
+- `budget.max_runtime_minutes` is enforced as a hard deadline on real runs —
+  the agent is stopped when it expires (dry-run is unaffected).
+- `runtime.cleanup` is honored: the disposable workspace copy is removed after
+  the run; set `cleanup: false` to keep it for debugging. Session artifacts
+  under `.agentbox/sessions/` are always kept.
+
 ## Runtime image
 
-Real container runs execute the agent inside a Docker image. The default policy
+Real container runs execute the agent inside a container image (Docker or
+Podman). The default policy
 references `agentbox/default:latest`, which **you must provide** — there is no
 published image yet. Build a minimal one from the example:
 
@@ -176,8 +199,10 @@ The security acceptance tests (§8) live in `internal/cli/security_test.go`.
 - `network: allowlist` is **not** enforced yet (no proxy/firewall); it falls back
   to `deny` and the domain list is advisory.
 - `commands.deny` is best-effort and cannot stop an agent that spawns shells indirectly.
-- `budget` token/USD caps depend on adapter support and are reported as `unknown` otherwise.
-- Real container execution requires a runtime image you build; podman is not yet implemented.
+- `budget` token/USD caps depend on adapter support and are reported as `unknown`
+  otherwise (`max_runtime_minutes` is enforced).
+- Real container execution requires a runtime image you build; there is no
+  published runtime image yet.
 - Secret redaction is best-effort and may miss unknown formats.
 
 ## Development

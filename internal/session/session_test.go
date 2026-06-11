@@ -107,6 +107,15 @@ func TestLoadNoSessions(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsPathTraversal(t *testing.T) {
+	base := t.TempDir()
+	for _, id := range []string{"../secrets", "a/b", `a\b`, "..", "20260101-000000-aaaaaa/../x"} {
+		if _, err := Load(base, id); err == nil {
+			t.Errorf("Load(%q) should reject path-like ids", id)
+		}
+	}
+}
+
 func TestSessionJSONShape(t *testing.T) {
 	base := t.TempDir()
 	rec := NewRecorder(base, "t", "custom")

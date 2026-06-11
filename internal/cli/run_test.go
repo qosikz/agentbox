@@ -3,9 +3,11 @@ package cli
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qosi/agentbox/internal/config"
 	"github.com/qosi/agentbox/internal/session"
@@ -156,6 +158,169 @@ func TestParseRunFlagsRepoPositional(t *testing.T) {
 	}
 	if o.task != "add tests" {
 		t.Errorf("task=%q", o.task)
+	}
+}
+
+func TestParseRunFlagsEngine(t *testing.T) {
+	o, err := parseRunFlags([]string{"task", "--engine", "podman"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.engine != "podman" {
+		t.Errorf("engine = %q, want podman", o.engine)
+	}
+}
+
+func TestRunInvalidEngineFlag(t *testing.T) {
+	setupProject(t)
+	r := NewRoot("test", "none", "now")
+	err := r.cmdRun(context.Background(), []string{"task", "--engine", "rocketship", "--dry-run"})
+	if CodeFor(err) != ExitInvalidConfig {
+		t.Errorf("invalid --engine should exit %d, got %d (err=%v)", ExitInvalidConfig, CodeFor(err), err)
+	}
+}
+
+// noTestsPolicy is a minimal echo-agent policy with no test commands, used by
+// real-run tests so they do not trigger `go test` in a bare temp dir.
+const noTestsPolicy = "agent:\n  default: custom\n  custom:\n    command: echo\n    args:\n      - \"{{ task }}\"\ntests:\n  commands: []\n"
+
+func TestRunCleanupRemovesWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "agentbox.yaml"), []byte(noTestsPolicy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, dir)
+	r := NewRoot("test", "none", "now")
+	if err := r.cmdRun(context.Background(), []string{"hello", "--runtime", "local", "--yes-unsafe"}); err != nil {
+		t.Fatalf("run: %v (code %d)", err, CodeFor(err))
+	}
+	// cleanup defaults to true: the disposable work dir must be gone.
+	entries, _ := os.ReadDir(filepath.Join(dir, ".agentbox", "work"))
+	if len(entries) != 0 {
+		t.Errorf("expected .agentbox/work to be cleaned, found %d entries", len(entries))
+	}
+	// Session artifacts are always kept.
+	if _, err := session.List(dir); err != nil {
+		t.Errorf("session should survive cleanup: %v", err)
+	}
+}
+
+func TestRunCleanupFalseKeepsWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	pol := noTestsPolicy + "runtime:\n  isolation: container\n  engine: docker\n  image: img\n  cleanup: false\n"
+	if err := os.WriteFile(filepath.Join(dir, "agentbox.yaml"), []byte(pol), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, dir)
+	r := NewRoot("test", "none", "now")
+	if err := r.cmdRun(context.Background(), []string{"hello", "--runtime", "local", "--yes-unsafe"}); err != nil {
+		t.Fatalf("run: %v (code %d)", err, CodeFor(err))
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, ".agentbox", "work"))
+	if len(entries) == 0 {
+		t.Error("cleanup: false should keep the workspace copy for debugging")
+	}
+}
+
+// Regression for SEC-CLEANUP-DELETES-COMMIT: a --commit branch must survive
+// workspace cleanup by being propagated back into the source repository.
+func TestRunCommitSurvivesCleanup(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	gitc := func(args ...string) {
+		t.Helper()
+		full := append([]string{"-C", dir, "-c", "user.email=a@b.c", "-c", "user.name=t", "-c", "commit.gpgsign=false"}, args...)
+		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	gitc("init")
+	gitc("checkout", "-b", "main")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitc("add", "-A")
+	gitc("commit", "-m", "init")
+	// Agent creates a file; default cleanup=true; commit requested.
+	pol := "agent:\n  default: custom\n  custom:\n    command: sh\n    args: [\"-c\", \"echo agent > agent.txt\"]\ntests:\n  commands: []\n"
+	if err := os.WriteFile(filepath.Join(dir, "agentbox.yaml"), []byte(pol), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitc("add", "-A")
+	gitc("commit", "-m", "policy")
+	chdir(t, dir)
+
+	r := NewRoot("test", "none", "now")
+	if err := r.cmdRun(context.Background(), []string{"add agent file", "--runtime", "local", "--yes-unsafe", "--commit"}); err != nil {
+		t.Fatalf("run: %v (code %d)", err, CodeFor(err))
+	}
+
+	// The workspace must be cleaned AND the branch must exist in the source repo.
+	if entries, _ := os.ReadDir(filepath.Join(dir, ".agentbox", "work")); len(entries) != 0 {
+		t.Errorf("workspace should be cleaned after successful propagation, found %d entries", len(entries))
+	}
+	out, err := exec.Command("git", "-C", dir, "branch", "--list", "agentbox/*").Output()
+	if err != nil || !strings.Contains(string(out), "agentbox/") {
+		t.Errorf("agentbox branch missing from source repo after cleanup; branches: %q err=%v", out, err)
+	}
+	// And the commit on that branch must contain the agent's file.
+	s := latestSession(t, dir)
+	if s.Branch == "" {
+		t.Fatal("session should record the branch")
+	}
+	show, err := exec.Command("git", "-C", dir, "show", "--stat", s.Branch).Output()
+	if err != nil || !strings.Contains(string(show), "agent.txt") {
+		t.Errorf("propagated branch should contain agent.txt, got: %q err=%v", show, err)
+	}
+}
+
+// Regression for GO-CORRECTNESS-005: budget enforcement must be testable and
+// report an actionable budget error, not a generic agent failure.
+func TestRunBudgetExceeded(t *testing.T) {
+	old := budgetWindow
+	budgetWindow = func(int) time.Duration { return 150 * time.Millisecond }
+	defer func() { budgetWindow = old }()
+
+	dir := t.TempDir()
+	pol := "agent:\n  default: custom\n  custom:\n    command: sleep\n    args: [\"5\"]\nbudget:\n  max_runtime_minutes: 1\ntests:\n  commands: []\n"
+	if err := os.WriteFile(filepath.Join(dir, "agentbox.yaml"), []byte(pol), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, dir)
+
+	r := NewRoot("test", "none", "now")
+	start := time.Now()
+	err := r.cmdRun(context.Background(), []string{"sleep forever", "--runtime", "local", "--yes-unsafe"})
+	if time.Since(start) > 3*time.Second {
+		t.Fatalf("budget window not applied; run took %v", time.Since(start))
+	}
+	if CodeFor(err) != ExitAgentFailed {
+		t.Fatalf("budget kill should exit %d, got %d (err=%v)", ExitAgentFailed, CodeFor(err), err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "budget exceeded") {
+		t.Errorf("error should mention the budget, got: %v", err)
+	}
+	// The session must carry the budget policy event.
+	s := latestSession(t, dir)
+	found := false
+	for _, e := range s.PolicyEvents {
+		if strings.Contains(e.Detail, "max_runtime_minutes") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("budget policy event missing; events: %v", s.PolicyEvents)
+	}
+}
+
+func TestRunInvalidRuntimeFlag(t *testing.T) {
+	setupProject(t)
+	r := NewRoot("test", "none", "now")
+	err := r.cmdRun(context.Background(), []string{"task", "--runtime", "hypervisor", "--dry-run"})
+	if CodeFor(err) != ExitInvalidConfig {
+		t.Errorf("invalid --runtime should exit %d, got %d (err=%v)", ExitInvalidConfig, CodeFor(err), err)
 	}
 }
 

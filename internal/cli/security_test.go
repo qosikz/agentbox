@@ -121,6 +121,36 @@ func TestRunRedactsSecretsInSavedLogs(t *testing.T) {
 	}
 }
 
+// Env hygiene: the host PATH/HOME must never be forwarded into a container.
+// Containers get a standard Linux PATH; HOME is set to the workspace by
+// buildRuntimeSpec, never to the host home.
+func TestContainerEnvExcludesHostPathAndHome(t *testing.T) {
+	hostPath := os.Getenv("PATH")
+	ep := policy.BuildEffectivePolicy(config.DefaultPolicy(), "", policy.Overrides{})
+	env := buildAgentEnv(ep)
+	if env["PATH"] == hostPath {
+		t.Error("container env must not contain the host PATH")
+	}
+	if env["PATH"] != containerPATH {
+		t.Errorf("container PATH = %q, want standard Linux PATH", env["PATH"])
+	}
+	if _, hasHome := env["HOME"]; hasHome {
+		t.Error("buildAgentEnv must not leak host HOME into containers (HOME is set to the workspace later)")
+	}
+
+	// The runtime spec sets HOME to the workspace, not the host home.
+	spec := buildRuntimeSpec(ep, workspace.Plan{}, "/work/dir", env, runOptions{})
+	if spec.Env["HOME"] != "/work/dir" {
+		t.Errorf("container HOME = %q, want the workspace /work/dir", spec.Env["HOME"])
+	}
+
+	// Local (unsafe) runs do need the host PATH to function.
+	epLocal := policy.BuildEffectivePolicy(config.DefaultPolicy(), "", policy.Overrides{Runtime: "local"})
+	if got := buildAgentEnv(epLocal)["PATH"]; got != hostPath {
+		t.Errorf("local-run PATH = %q, want host PATH", got)
+	}
+}
+
 // §8.9 host-home access only with explicit flag; otherwise home denies hold.
 func TestAllowHostHomeRequiresFlag(t *testing.T) {
 	without := policy.BuildEffectivePolicy(config.DefaultPolicy(), "", policy.Overrides{})

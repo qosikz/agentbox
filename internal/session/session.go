@@ -346,6 +346,12 @@ func Load(base, id string) (Session, error) {
 		}
 		return list[0], nil
 	}
+	// Security: a session id is a single directory name. Reject path
+	// separators and parent references so a crafted id cannot escape the
+	// sessions directory.
+	if strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") {
+		return Session{}, fmt.Errorf("invalid session id %q; run 'agentbox session list' to see valid ids", id)
+	}
 	return readSession(filepath.Join(SessionsDir(base), id))
 }
 

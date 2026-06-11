@@ -55,6 +55,13 @@ func TestBuildDockerArgs_SecureDefaults(t *testing.T) {
 	if len(args) < 2 || args[0] != "run" || args[1] != "--rm" {
 		t.Fatalf("expected args to start with [run --rm], got %v", args)
 	}
+	// Hardening flags must always be present (valid for docker and podman).
+	if !containsPair(args, "--cap-drop", "ALL") {
+		t.Errorf("expected --cap-drop ALL, got %v", args)
+	}
+	if !containsPair(args, "--security-opt", "no-new-privileges") {
+		t.Errorf("expected --security-opt no-new-privileges, got %v", args)
+	}
 	if !containsPair(args, "--network", "none") {
 		t.Errorf("expected --network none, got %v", args)
 	}
@@ -345,4 +352,121 @@ func TestDockerRunner_Run_SkipsWithoutDocker(t *testing.T) {
 	// Either a context error wrap or a docker start error is acceptable; we only
 	// require that Run does not panic and returns.
 	_ = err
+}
+
+func TestPodmanRunner_Name(t *testing.T) {
+	if got := NewPodmanRunner().Name(); got != "podman" {
+		t.Errorf("Name() = %q, want podman", got)
+	}
+}
+
+func TestPodmanRunner_Available(t *testing.T) {
+	r := NewPodmanRunner()
+	err := r.Available(context.Background())
+	if _, lookErr := exec.LookPath("podman"); lookErr != nil {
+		// podman not installed: Available must return an actionable error that
+		// tells the user what to do instead.
+		if err == nil {
+			t.Fatal("expected non-nil error when podman is not on PATH")
+		}
+		for _, want := range []string{"podman is not available", "--engine docker", "--dry-run"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("Available() error %q missing actionable hint %q", err, want)
+			}
+		}
+		return
+	}
+	// podman present: Available must succeed (it does not contact the service).
+	if err != nil {
+		t.Errorf("Available() = %v, want nil when podman is on PATH", err)
+	}
+}
+
+func TestEngineFailureError(t *testing.T) {
+	const image = "ghcr.io/qosi/agentbox:latest"
+	tests := []struct {
+		name     string
+		engine   string
+		exitCode int
+		stderr   string
+		wantErr  bool
+	}{
+		{"exit 0 success", "docker", 0, "", false},
+		{"exit 1 agent failure", "docker", 1, "test suite failed", false},
+		{"exit 126 not executable", "docker", 126, "permission denied", false},
+		{"exit 127 command not found", "podman", 127, "aider: not found", false},
+		{"exit 125 docker engine failure", "docker", 125, "Unable to find image 'ghcr.io/qosi/agentbox:latest' locally", true},
+		{"exit 125 podman engine failure", "podman", 125, "Error: ghcr.io/qosi/agentbox:latest: image not known", true},
+		{"exit 125 daemon failure", "docker", 125, "docker: Error response from daemon: something broke", true},
+		// 125 WITHOUT a recognizable engine marker is the agent's own exit code
+		// inside a working container: not an engine failure.
+		{"exit 125 empty stderr is agent exit", "docker", 125, "", false},
+		{"exit 125 agent stderr is agent exit", "docker", 125, "my-agent: fatal: budget spent", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := engineFailureError(tt.engine, image, tt.exitCode, tt.stderr)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("engineFailureError(%d) = %v, want nil", tt.exitCode, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("engineFailureError(%d) = nil, want error", tt.exitCode)
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, image) {
+				t.Errorf("error must mention image %q, got: %s", image, msg)
+			}
+			if !strings.Contains(msg, tt.engine) {
+				t.Errorf("error must mention engine %q, got: %s", tt.engine, msg)
+			}
+			if excerpt := strings.TrimSpace(tt.stderr); excerpt != "" && !strings.Contains(msg, excerpt) {
+				t.Errorf("error must include stderr excerpt %q, got: %s", excerpt, msg)
+			}
+			if !strings.Contains(msg, "--dry-run") {
+				t.Errorf("error must hint at --dry-run, got: %s", msg)
+			}
+		})
+	}
+}
+
+func TestEngineFailureError_TruncatesStderr(t *testing.T) {
+	// Marker prefix makes it a genuine engine failure; the long tail must be cut.
+	longStderr := "Error response from daemon: " + strings.Repeat("x", 1000)
+	err := engineFailureError("docker", "img:latest", 125, longStderr)
+	if err == nil {
+		t.Fatal("expected error for exit code 125 with engine marker")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, longStderr) {
+		t.Errorf("stderr excerpt should be truncated to ~200 chars, full stderr found in: %s", msg)
+	}
+	if !strings.Contains(msg, "...") {
+		t.Errorf("expected truncated excerpt with ellipsis, got: %s", msg)
+	}
+}
+
+func TestInsertContainerName(t *testing.T) {
+	args := insertContainerName([]string{"run", "--rm", "--cap-drop", "ALL", "img", "echo"}, "agentbox-abc123")
+	want := []string{"run", "--rm", "--name", "agentbox-abc123", "--cap-drop", "ALL", "img", "echo"}
+	if len(args) != len(want) {
+		t.Fatalf("len = %d, want %d (%v)", len(args), len(want), args)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Errorf("args[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+}
+
+func TestContainerNameUnique(t *testing.T) {
+	a, b := containerName(), containerName()
+	if a == b {
+		t.Errorf("container names should be unique, got %q twice", a)
+	}
+	if !strings.HasPrefix(a, "agentbox-") {
+		t.Errorf("container name should be agentbox-prefixed, got %q", a)
+	}
 }

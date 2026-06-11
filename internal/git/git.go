@@ -214,6 +214,34 @@ func (r *Repo) Commit(ctx context.Context, message string) error {
 	return nil
 }
 
+// FetchBranch copies branch from the repository at fromDir into the repository
+// at repoDir (creating or updating the same-named local branch). AgentBox uses
+// this to propagate a commit made in a disposable workspace copy back into the
+// user's real repository before the workspace is cleaned up. Fetching (rather
+// than pushing into a non-bare repo) avoids receive-side restrictions.
+func FetchBranch(ctx context.Context, repoDir, fromDir, branch string) error {
+	if strings.TrimSpace(branch) == "" {
+		return errors.New("fetch branch: empty branch name")
+	}
+	if _, err := run(ctx, "-C", repoDir, "fetch", fromDir, branch+":"+branch); err != nil {
+		return fmt.Errorf("copying branch %q from the workspace into %s: %s", branch, repoDir, errMsg(err))
+	}
+	return nil
+}
+
+// PushBranch pushes branch to the named remote (e.g. "origin"). Used after a
+// commit in a cloned workspace so the branch survives workspace cleanup and a
+// pull request can reference it. Requires push credentials (e.g. gh auth).
+func (r *Repo) PushBranch(ctx context.Context, remote, branch string) error {
+	if strings.TrimSpace(branch) == "" {
+		return errors.New("push branch: empty branch name")
+	}
+	if _, err := run(ctx, "-C", r.Dir, "push", remote, branch); err != nil {
+		return fmt.Errorf("pushing branch %q to %s: %s", branch, remote, errMsg(err))
+	}
+	return nil
+}
+
 // Clone clones repo into dest. The remote is normalized so callers may pass a
 // bare "github.com/org/repo" shorthand.
 func Clone(ctx context.Context, repo, dest string) error {

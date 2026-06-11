@@ -3,11 +3,13 @@ package cli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/qosi/agentbox/internal/adapters"
 	"github.com/qosi/agentbox/internal/config"
@@ -19,9 +21,19 @@ import (
 	"github.com/qosi/agentbox/internal/workspace"
 )
 
-// minimalSafeEnv are the only host variables passed to an agent in addition to
-// explicitly allowlisted secrets. No other host environment is forwarded.
+// minimalSafeEnv are the only host variables passed to an agent running in
+// unsafe LOCAL mode, in addition to explicitly allowlisted secrets. No other
+// host environment is forwarded.
 var minimalSafeEnv = []string{"PATH", "HOME", "LANG", "LC_ALL", "TERM"}
+
+// containerPATH is the standard Linux PATH set inside containers. The host's
+// PATH (and HOME) must never leak into a container: they are host-specific,
+// can reveal usernames/layout, and would shadow the image's own binaries.
+const containerPATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+// budgetWindow converts budget.max_runtime_minutes into the run deadline.
+// It is a variable so tests can shrink the window to milliseconds.
+var budgetWindow = func(minutes int) time.Duration { return time.Duration(minutes) * time.Minute }
 
 func (r *Root) cmdRun(ctx context.Context, args []string) error {
 	o, err := parseRunFlags(args)
@@ -52,8 +64,16 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 		return codedf(ExitInvalidConfig, "policy %s is invalid; run 'agentbox policy check'", o.policy)
 	}
 
+	if o.engine != "" && o.engine != "docker" && o.engine != "podman" {
+		return codedf(ExitInvalidConfig, "--engine %q is invalid (expected: docker, podman)", o.engine)
+	}
+	// Security: an unrecognized --runtime value must not silently route the run
+	// down an unexpected path (e.g. host-env handling).
+	if o.runtime != "" && o.runtime != "container" && o.runtime != "local" {
+		return codedf(ExitInvalidConfig, "--runtime %q is invalid (expected: container, local)", o.runtime)
+	}
 	ov := policy.Overrides{
-		Network: o.network, Runtime: o.runtime, Agent: o.agent, ExtraWrite: o.write,
+		Network: o.network, Runtime: o.runtime, Engine: o.engine, Agent: o.agent, ExtraWrite: o.write,
 		Unsafe: o.unsafe, AllowHostHome: o.allowHostHome,
 		AllowDockerSocket: o.allowDockerSocket, YesUnsafe: o.yesUnsafe,
 	}
@@ -71,6 +91,15 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 		}
 	}
 
+	// Budget: max_runtime_minutes is a hard deadline for real runs, started
+	// AFTER the interactive unsafe prompt so waiting at the prompt never burns
+	// budget. The deadline bounds the clone, the agent, tests, and git work.
+	if !o.dryRun && ep.Budget.MaxRuntimeMinutes > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, budgetWindow(ep.Budget.MaxRuntimeMinutes))
+		defer cancel()
+	}
+
 	// 3. Start the session recorder.
 	rec := session.NewRecorder(base, o.task, ep.Agent.Default)
 	rec.Session.DryRun = o.dryRun
@@ -81,20 +110,55 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 
 	red := buildRedactor(ep)
 
+	// budgetHit/budgetExceeded centralize budget-kill detection and reporting
+	// so every phase (clone, agent, tests) reports it identically.
+	budgetHit := func() bool {
+		return ep.Budget.MaxRuntimeMinutes > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded)
+	}
+	budgetExceeded := func() error {
+		rec.PolicyBlocked(fmt.Sprintf("run exceeded budget.max_runtime_minutes (%d); agent stopped", ep.Budget.MaxRuntimeMinutes))
+		rec.Session.Result = session.Result{Status: "failed", Summary: "budget exceeded: run hit max_runtime_minutes"}
+		return finishErr(rec, red, codedf(ExitAgentFailed,
+			"budget exceeded: the run hit budget.max_runtime_minutes (%d) and was stopped.\nRaise the budget in %s or simplify the task.",
+			ep.Budget.MaxRuntimeMinutes, o.policy))
+	}
+
+	// Disposable directories for this run. When runtime.cleanup is true they
+	// are removed on every exit path (success or failure) — UNLESS the run
+	// produced a branch/commit that could not be propagated back, in which case
+	// the workspace is kept so the user's work is never destroyed. Session
+	// artifacts under .agentbox/sessions/ are always kept.
+	workDir := filepath.Join(base, ".agentbox", "work", rec.Session.ID)
+	cloneDir := filepath.Join(base, ".agentbox", "clone", rec.Session.ID)
+	keepWorkspace := false
+	if !o.dryRun && ep.Runtime.Cleanup {
+		defer func() {
+			if keepWorkspace {
+				return
+			}
+			_ = os.RemoveAll(workDir)
+			_ = os.RemoveAll(cloneDir)
+		}()
+	}
+
 	// 4. Resolve the working root (clone remote repos).
 	root := base
+	isRemote := false
 	if o.repo != "" && looksLikeRepo(o.repo) {
 		if o.dryRun {
 			rec.Logf("would clone %s", git.NormalizeRemote(o.repo))
 		} else {
 			// Clone into a separate dir; the sanitized workspace copy is built
 			// from it below so denied files are excluded for remote repos too.
-			dest := filepath.Join(base, ".agentbox", "clone", rec.Session.ID)
 			rec.Logf("cloning %s", git.NormalizeRemote(o.repo))
-			if err := git.Clone(ctx, o.repo, dest); err != nil {
+			if err := git.Clone(ctx, o.repo, cloneDir); err != nil {
+				if budgetHit() {
+					return budgetExceeded()
+				}
 				return finishErr(rec, red, coded(ExitGitFailed, err))
 			}
-			root = dest
+			root = cloneDir
+			isRemote = true
 		}
 	}
 
@@ -152,7 +216,6 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 	var repo *git.Repo
 	var baselineChanged map[string]bool
 	if !o.dryRun {
-		workDir := filepath.Join(base, ".agentbox", "work", rec.Session.ID)
 		if err := prepareWorkspace(plan, root, workDir); err != nil {
 			return finishErr(rec, red, coded(ExitGeneral, err))
 		}
@@ -174,7 +237,11 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 	rec.Event(session.EvRuntimeStarted)
 
 	// 9. Run the agent.
-	res, runErr := runner.Run(ctx, spec, toCommandSpec(cmd))
+	cs := toCommandSpec(cmd)
+	if ep.Budget.MaxRuntimeMinutes > 0 {
+		cs.Timeout = budgetWindow(ep.Budget.MaxRuntimeMinutes)
+	}
+	res, runErr := runner.Run(ctx, spec, cs)
 	for _, line := range res.Description {
 		rec.Log(line)
 	}
@@ -188,6 +255,12 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 		rec.Session.Commands[n-1].ExitCode = res.ExitCode
 	}
 	rec.Event(session.EvCommandExecuted)
+	// Budget kill first: depending on the runner, a deadline kill surfaces as
+	// an error (docker wrap) or as a clean exit code -1 (process killed by
+	// signal). The context tells the truth either way.
+	if budgetHit() {
+		return budgetExceeded()
+	}
 	if runErr != nil {
 		rec.Session.Result = session.Result{Status: "failed", Summary: runErr.Error()}
 		return finishErr(rec, red, codedf(ExitAgentFailed, "agent runtime error: %v", runErr))
@@ -222,6 +295,10 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 			tr, _ := runner.Run(ctx, spec, runtime.CommandSpec{
 				Executable: "sh", Args: []string{"-lc", tc}, Env: agentEnv, WorkingDir: execRoot,
 			})
+			// A budget kill mid-tests is a budget event, not a test failure.
+			if budgetHit() {
+				return budgetExceeded()
+			}
 			status := "passed"
 			if tr.ExitCode != 0 {
 				status, testsFailed = "failed", true
@@ -242,19 +319,51 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 	// 12. Commit / open PR (real runs only). The task is redacted before it is
 	//     written into the commit message and PR text, in case it carries a
 	//     secret value.
+	//
+	// The commit is created in the DISPOSABLE workspace copy, so it must be
+	// propagated back before cleanup or the user's requested work would be
+	// destroyed: local runs fetch the branch into the source repository;
+	// remote runs push it to origin. If propagation fails, the workspace is
+	// kept and its path reported — cleanup never deletes an unpropagated commit.
 	if !o.dryRun && repo != nil && (o.commit || o.openPR) {
 		safeTask := red.Redact(o.task)
 		branch := git.BranchName(o.task)
+		committed := false
 		if err := repo.CreateBranch(ctx, branch); err != nil {
 			rec.Logf("branch: %v", err)
 			warn("branch creation failed: " + err.Error())
 		} else {
 			rec.Session.Branch = branch
+			if err := repo.Commit(ctx, commitMessage(safeTask, rec.Session.ID)); err != nil {
+				rec.Logf("commit: %v", err)
+				warn("commit skipped: " + err.Error())
+			} else {
+				committed = true
+			}
 		}
-		if err := repo.Commit(ctx, commitMessage(safeTask, rec.Session.ID)); err != nil {
-			rec.Logf("commit: %v", err)
-			warn("commit skipped: " + err.Error())
+
+		if committed {
+			if isRemote {
+				if err := repo.PushBranch(ctx, "origin", branch); err != nil {
+					rec.Logf("push: %v", err)
+					warn("branch " + branch + " could not be pushed to origin: " + err.Error())
+					keepWorkspace = true
+					warn("workspace kept at " + execRoot + " to preserve the commit")
+				} else {
+					rec.Logf("pushed %s to origin", branch)
+				}
+			} else {
+				if err := git.FetchBranch(ctx, root, execRoot, branch); err != nil {
+					rec.Logf("propagate branch: %v", err)
+					warn("branch " + branch + " could not be copied into your repository: " + err.Error())
+					keepWorkspace = true
+					warn("workspace kept at " + execRoot + " to preserve the commit")
+				} else {
+					rec.Logf("branch %s created in %s", branch, root)
+				}
+			}
 		}
+
 		if o.openPR {
 			out, perr := repo.OpenPR(ctx, git.PRInput{
 				Title: "AgentBox: " + safeTask, Body: prBody(safeTask, ep, rec.Session.Tests, rec.Session.ID), Branch: branch, Base: "main",
@@ -313,13 +422,32 @@ func engineLabel(ep policy.EffectivePolicy) string {
 	return ep.Runtime.Engine
 }
 
-// buildAgentEnv assembles the environment passed to the agent: minimal safe
-// host variables plus explicitly allowlisted secrets. Nothing else is exposed.
+// buildAgentEnv assembles the environment passed to the agent.
+//
+// Container runs get a container-appropriate environment: a standard Linux
+// PATH (never the host's), LANG/LC_ALL/TERM pass-through, and explicitly
+// allowlisted secrets. HOME is set later to the workspace (see
+// buildRuntimeSpec) so tools have a writable home.
+//
+// Local (unsafe) runs need the host PATH/HOME to function, so they get the
+// minimal safe host variables instead. Nothing else is ever forwarded.
 func buildAgentEnv(ep policy.EffectivePolicy) map[string]string {
 	env := map[string]string{}
-	for _, k := range minimalSafeEnv {
-		if v := os.Getenv(k); v != "" {
-			env[k] = v
+	// Fail safe: only the explicit "local" isolation gets host variables; any
+	// other value (including future/unknown ones) gets the container-hygiene
+	// environment.
+	if ep.Runtime.Isolation == "local" {
+		for _, k := range minimalSafeEnv {
+			if v := os.Getenv(k); v != "" {
+				env[k] = v
+			}
+		}
+	} else {
+		env["PATH"] = containerPATH
+		for _, k := range []string{"LANG", "LC_ALL", "TERM"} {
+			if v := os.Getenv(k); v != "" {
+				env[k] = v
+			}
 		}
 	}
 	for _, name := range ep.Secrets.Allow {
@@ -362,12 +490,24 @@ func buildRuntimeSpec(ep policy.EffectivePolicy, plan workspace.Plan, root strin
 		writeMounts = []string{root} // the sanitized workspace copy
 	}
 
+	// Containers get HOME pointed at the writable workspace so tools that
+	// need a home directory (git, package managers) work under --user.
+	// Fail safe: every isolation except explicit "local" is container-like.
+	specEnv := env
+	if ep.Runtime.Isolation != "local" {
+		specEnv = make(map[string]string, len(env)+1)
+		for k, v := range env {
+			specEnv[k] = v
+		}
+		specEnv["HOME"] = root
+	}
+
 	return runtime.RuntimeSpec{
 		Engine:            engineLabel(ep),
 		Image:             ep.Runtime.Image,
 		NetworkMode:       netMode,
 		Workdir:           root,
-		Env:               env,
+		Env:               specEnv,
 		User:              "10001:10001",       // non-root
 		Privileged:        false,               // never
 		MountDockerSocket: o.allowDockerSocket, // only with explicit unsafe flag
@@ -387,9 +527,9 @@ func selectRunner(ep policy.EffectivePolicy, o runOptions) (runtime.Runner, erro
 	case "docker":
 		return runtime.NewDockerRunner(), nil
 	case "podman":
-		return nil, codedf(ExitRuntimeUnavail, "podman runtime is not implemented yet.\nUse engine docker, or run with --dry-run.")
+		return runtime.NewPodmanRunner(), nil
 	default:
-		return nil, codedf(ExitRuntimeUnavail, "unknown runtime engine %q", ep.Runtime.Engine)
+		return nil, codedf(ExitRuntimeUnavail, "unknown runtime engine %q (expected: docker, podman)", ep.Runtime.Engine)
 	}
 }
 
@@ -582,13 +722,8 @@ func printRunSummary(rec *session.Recorder, ep policy.EffectivePolicy, o runOpti
 		ok(w, "Diff generated")
 	}
 	ok(w, "Session saved")
-
-	// Surface an actionable hint when the container failed to even start
-	// (exit 125 is Docker's "container could not be created" code, most often a
-	// missing runtime image).
-	if !o.dryRun && res.ExitCode == 125 {
-		fmt.Fprintln(w, "\nThe runtime container failed to start (exit 125).")
-		fmt.Fprintf(w, "The image %q may not exist locally. Build or pull it, or use --dry-run.\n", ep.Runtime.Image)
+	if !o.dryRun && ep.Runtime.Cleanup {
+		ok(w, "Workspace cleaned")
 	}
 
 	if o.dryRun && len(res.Description) > 0 {
@@ -598,6 +733,9 @@ func printRunSummary(rec *session.Recorder, ep policy.EffectivePolicy, o runOpti
 		}
 	}
 
+	if s.Branch != "" {
+		fmt.Fprintf(w, "\nBranch: %s\n", s.Branch)
+	}
 	if len(s.ChangedFiles) > 0 {
 		fmt.Fprintln(w, "\nChanged files:")
 		for _, f := range s.ChangedFiles {

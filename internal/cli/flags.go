@@ -13,6 +13,7 @@ type runOptions struct {
 	policy            string
 	network           string
 	runtime           string
+	engine            string
 	write             []string
 	dryRun            bool
 	commit            bool
@@ -26,7 +27,7 @@ type runOptions struct {
 
 var runValueFlags = map[string]bool{
 	"task": true, "repo": true, "agent": true, "policy": true,
-	"network": true, "runtime": true, "write": true,
+	"network": true, "runtime": true, "engine": true, "write": true,
 }
 
 // parseRunFlags parses `run` arguments: a positional task or repo plus flags.
@@ -65,6 +66,8 @@ func parseRunFlags(args []string) (runOptions, error) {
 			o.network = val
 		case "runtime":
 			o.runtime = val
+		case "engine":
+			o.engine = val
 		case "write":
 			o.write = append(o.write, val)
 		case "dry-run":

@@ -27,6 +27,7 @@ var homeDenyPrefixes = []string{"~/."}
 type Overrides struct {
 	Network           string   // "" | deny | allowlist | open
 	Runtime           string   // "" | container | local
+	Engine            string   // "" | docker | podman
 	Agent             string   // "" | adapter name
 	ExtraWrite        []string // additional --write paths
 	Unsafe            bool     // master unsafe switch
@@ -76,6 +77,9 @@ func BuildEffectivePolicy(cfg config.Policy, policyPath string, ov Overrides) Ef
 	}
 	if ov.Runtime != "" {
 		ep.Runtime.Isolation = ov.Runtime
+	}
+	if ov.Engine != "" {
+		ep.Runtime.Engine = ov.Engine
 	}
 	if ov.Agent != "" {
 		ep.Agent.Default = ov.Agent

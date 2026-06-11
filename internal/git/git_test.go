@@ -269,3 +269,40 @@ func TestParsePRURL(t *testing.T) {
 		})
 	}
 }
+
+func TestFetchBranchPropagatesCommit(t *testing.T) {
+	gitOrSkip(t)
+	src := newTempRepo(t)
+
+	// Simulate a disposable workspace: clone src, branch + commit there.
+	work := filepath.Join(t.TempDir(), "work")
+	gitRun(t, src, "clone", src, work) // -C src irrelevant for clone; produces work
+	gitRun(t, work, "checkout", "-b", "agentbox/test-abc123")
+	if err := os.WriteFile(filepath.Join(work, "new.txt"), []byte("agent\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, work, "add", "-A")
+	gitRun(t, work, "commit", "-m", "agentbox: test")
+
+	if err := FetchBranch(context.Background(), src, work, "agentbox/test-abc123"); err != nil {
+		t.Fatalf("FetchBranch: %v", err)
+	}
+	// The branch must now exist in the source repo.
+	cmd := exec.Command("git", "-C", src, "rev-parse", "--verify", "agentbox/test-abc123")
+	if err := cmd.Run(); err != nil {
+		t.Errorf("branch not propagated into source repo: %v", err)
+	}
+}
+
+func TestFetchBranchEmptyName(t *testing.T) {
+	if err := FetchBranch(context.Background(), ".", ".", ""); err == nil {
+		t.Fatal("empty branch name should error")
+	}
+}
+
+func TestPushBranchEmptyName(t *testing.T) {
+	r := &Repo{Dir: "."}
+	if err := r.PushBranch(context.Background(), "origin", ""); err == nil {
+		t.Fatal("empty branch name should error")
+	}
+}
