@@ -47,11 +47,12 @@ jobs:
         env:
           COSIGN_YES: "true"
         # checksums.txt covers every binary by SHA-256, so one signature over it
-        # transitively authenticates all release artifacts.
+        # transitively authenticates all release artifacts. cosign v3 emits a
+        # single bundle (signature + certificate + transparency-log entry);
+        # verify with `cosign verify-blob --bundle checksums.txt.cosign.bundle`.
         run: |
           cosign sign-blob \
-            --output-signature dist/checksums.txt.sig \
-            --output-certificate dist/checksums.txt.pem \
+            --bundle dist/checksums.txt.cosign.bundle \
             dist/checksums.txt
 
       - name: Attest build provenance (SLSA)

@@ -376,10 +376,10 @@ Verify the binaries (the signature covers `checksums.txt`, which covers every
 binary by SHA-256):
 
 ```bash
-# 1. checksums are signed by the release workflow (keyless / Sigstore)
+# 1. checksums are signed by the release workflow (keyless / Sigstore).
+#    The bundle carries the signature, certificate, and transparency-log entry.
 cosign verify-blob \
-  --certificate checksums.txt.pem \
-  --signature   checksums.txt.sig \
+  --bundle checksums.txt.cosign.bundle \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github.com/qosikz/agentbox/\.github/workflows/release\.yml@' \
   checksums.txt
