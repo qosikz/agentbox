@@ -328,7 +328,7 @@ func TestCommitWithoutIdentityFallsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(out); !strings.Contains(got, "agentbox@localhost") {
-		t.Errorf("fallback committer = %q, want agentbox@localhost", got)
+	if got := string(out); !strings.Contains(got, "agentbox@qosi.kz") {
+		t.Errorf("fallback committer = %q, want agentbox@qosi.kz", got)
 	}
 }

@@ -2,6 +2,14 @@
 
 All notable changes to AgentBox are documented here.
 
+## Unreleased
+
+### Changed
+- The fallback commit identity used when a repo has no configured git identity
+  (e.g. fresh CI runners) is now `QOSI AgentBox <agentbox@qosi.kz>` instead of
+  `AgentBox <agentbox@localhost>` — an intentional, branded identity for
+  agent-made commits.
+
 ## v0.5.0 — 2026-06-13 (configurable egress ports + adoption polish)
 
 ### Added

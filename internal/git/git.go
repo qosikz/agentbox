@@ -207,7 +207,7 @@ func (r *Repo) CreateBranch(ctx context.Context, name string) error {
 // commit it returns a clear error so the caller can decide how to react.
 //
 // When the repository has no committer identity configured (common on fresh
-// CI runners), the commit is recorded under a neutral AgentBox identity
+// CI runners), the commit is recorded under a neutral "QOSI AgentBox" identity
 // instead of failing — the alternative is silently losing the agent's work.
 func (r *Repo) Commit(ctx context.Context, message string) error {
 	if _, err := run(ctx, "-C", r.Dir, "add", "-A"); err != nil {
@@ -224,7 +224,7 @@ func (r *Repo) Commit(ctx context.Context, message string) error {
 	}
 	args := []string{"-C", r.Dir}
 	if !r.hasIdentity(ctx) {
-		args = append(args, "-c", "user.name=AgentBox", "-c", "user.email=agentbox@localhost")
+		args = append(args, "-c", "user.name=QOSI AgentBox", "-c", "user.email=agentbox@qosi.kz")
 	}
 	args = append(args, "commit", "-m", message)
 	if _, err := run(ctx, args...); err != nil {
