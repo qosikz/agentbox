@@ -46,8 +46,10 @@ Policy: agentbox.yaml
 > scanning, real container execution (Docker or Podman), **enforced network
 > egress** (allowlist), harness integration (`exec` / `mcp serve` / `skill`),
 > and baked-in containerized agents are supported. A signed default runtime
-> image is published and pulled automatically — `agentbox run` works out of the
-> box (see [Runtime image](#runtime-image) and
+> image is published and pulled automatically, so the **sandbox runs out of the
+> box** — `agentbox exec` proves isolation, network-deny, recording, and
+> diff/audit with no setup; add a real agent when you want it to make edits (see
+> [Two ways to start](#two-ways-to-start) and
 > [Verifying releases](#verifying-releases)).
 
 ## Add AgentBox to your agent harness
@@ -137,25 +139,57 @@ needed for real (non-dry-run) container execution.
 
 ## Quickstart
 
+From inside your project (a git repo — that's how AgentBox captures the diff):
+
 ```bash
 # 1. Create a policy and session directory
 agentbox init
 
-# 2. Validate the policy and view the effective configuration
-agentbox policy check
+# 2. Prove the sandbox for real — runs in an isolated container. The default
+#    image is pulled automatically; no API key, nothing to build, host untouched.
+agentbox exec "whoami && uname -m && echo sandboxed > proof.txt"
 
-# 3. Plan a run without executing anything (safe, no Docker needed)
-agentbox run "fix failing tests" --dry-run
-
-# 4. Inspect the recorded session
-agentbox session list
+# 3. See exactly what happened
 agentbox session show latest
+```
 
-# 5. Scan an MCP server for dangerous capabilities
-agentbox mcp scan ./path-to-mcp-server
+That first run is the whole pitch in ten seconds. `session show` reports:
+
+```text
+Changed files
+  proof.txt
+Commands
+  [exit 0] whoami && uname -m && echo sandboxed > proof.txt
+Policy events
+  BLOCKED outbound network access (network=deny)
+```
+
+You ran a command as a **non-root** user inside a throwaway container, the
+network was **denied by default**, the change landed only in a disposable copy
+(your repo is untouched), and the whole thing was **recorded with a diff and an
+audit log** — with zero setup.
+
+```bash
+# 4. Validate/inspect policy, plan an agent run, scan an MCP server
+agentbox policy check
+agentbox run "fix failing tests" --dry-run        # plan only; no Docker needed
+agentbox mcp scan ./path-to-mcp-server            # exit 2 if unsafe
 ```
 
 `agentbox doctor` checks your local setup (Docker, git, gh, known agents).
+
+### Two ways to start
+
+- **Sandbox mechanics — ready now, zero setup.** The default runtime image and
+  `agentbox exec` prove the core: container isolation, non-root execution,
+  network-deny, session recording, secret redaction, and a diff/audit of every
+  change. No API key, no image to build. *(The default `run` agent is a no-op
+  `echo`, so a bare `agentbox run` exercises the full pipeline but makes no
+  edits — that's intentional: the first run is safe and free.)*
+- **A real AI agent making the edits — optional next step.** Point the `custom`
+  adapter at any agent CLI (local mode), or bake an agent into a runtime image
+  for a fully containerized run. See
+  [Run an agent fully containerized](#run-an-agent-fully-containerized-baked-in-agents).
 
 ## Commands
 
@@ -209,8 +243,13 @@ keychain/OAuth logins (like `claude`'s) only work in local mode.
 
 ### Run an agent fully containerized (baked-in agents)
 
-To run a coding agent inside the sandbox, **bake its CLI into a runtime image**
-and let AgentBox run it under policy. The agent binary lives in the image, not
+This is the **optional next step**, not the first run. The default runtime image
+already proves the sandbox mechanics (see [Two ways to start](#two-ways-to-start));
+bake an agent in only when you want an AI to make the edits *inside* the
+container.
+
+To do that, **bake its CLI into a runtime image** and let AgentBox run it under
+policy. The agent binary lives in the image, not
 on your host — AgentBox preflights it by probing the image, so a baked-in agent
 you have never installed locally still runs.
 
