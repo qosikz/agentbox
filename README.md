@@ -15,6 +15,12 @@ sandbox* to test risky commands, validate generated code, and vet new tools or
 subagents before trusting them. Via `agentbox exec`, an MCP server, or a
 cross-harness skill.
 
+<p align="center">
+  <img src="demo/egress.gif" alt="AgentBox enforces network egress — the agent reaches an allowlisted domain, DNS is dead, everything else fails closed, and every attempt is in the audit trail" width="860">
+</p>
+
+> _Enforced egress in ~60s: allowlist one domain — the sandbox reaches it and **nothing else**, with every attempt audited. ([how it's recorded](demo/))_
+
 ```bash
 agentbox run "fix failing tests"
 ```
