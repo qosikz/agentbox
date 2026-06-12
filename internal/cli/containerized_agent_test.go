@@ -61,6 +61,7 @@ type fakeRunner struct {
 	probePresent bool
 	probeErr     error
 	ran          bool
+	egressLog    []string
 }
 
 func (f *fakeRunner) Name() string                        { return "fake" }
@@ -70,7 +71,7 @@ func (f *fakeRunner) ProbeBinary(ctx context.Context, image, bin string) (bool, 
 }
 func (f *fakeRunner) Run(ctx context.Context, spec runtime.RuntimeSpec, command runtime.CommandSpec) (runtime.RunResult, error) {
 	f.ran = true
-	return runtime.RunResult{ExitCode: 0}, nil
+	return runtime.RunResult{ExitCode: 0, EgressLog: f.egressLog}, nil
 }
 
 // A container run whose agent is absent from the image must fail fast with an
@@ -130,5 +131,75 @@ func TestContainerDryRunSkipsHostAgentCheck(t *testing.T) {
 	r := NewRoot("test", "none", "now")
 	if err := r.cmdRun(context.Background(), []string{"do a thing", "--dry-run"}); err != nil {
 		t.Fatalf("container dry-run should not fail on a host-missing baked-in agent: %v (code %d)", err, CodeFor(err))
+	}
+}
+
+// Egress audit lines returned by the runner must land in the session: denials
+// as policy events, allows as log lines.
+func TestRunRecordsEgressDenialsAsPolicyEvents(t *testing.T) {
+	dir := t.TempDir()
+	writeExecPolicy(t, dir, "")
+	chdir(t, dir)
+
+	fr := &fakeRunner{probePresent: true, egressLog: []string{
+		"AGENTBOX-EGRESS ALLOW connect api.openai.com:443",
+		"AGENTBOX-EGRESS DENY connect evil.example:443: host is not in the network.allow list",
+	}}
+	orig := selectRunnerFn
+	selectRunnerFn = func(ep policy.EffectivePolicy, o runOptions) (runtime.Runner, error) { return fr, nil }
+	t.Cleanup(func() { selectRunnerFn = orig })
+
+	r := NewRoot("test", "none", "now")
+	if err := r.cmdRun(context.Background(), []string{"do a thing"}); err != nil {
+		t.Fatalf("run: %v (code %d)", err, CodeFor(err))
+	}
+	s := latestSession(t, dir)
+	foundDeny := false
+	for _, e := range s.PolicyEvents {
+		if strings.Contains(e.Detail, "evil.example:443") {
+			foundDeny = true
+		}
+		if strings.Contains(e.Detail, "api.openai.com") {
+			t.Errorf("ALLOW lines must not become policy events: %v", e)
+		}
+	}
+	if !foundDeny {
+		t.Errorf("egress denial should be a policy event, got: %v", s.PolicyEvents)
+	}
+}
+
+// recordEgress must classify by the verb field, not a free substring: an
+// ALLOW line whose method/host text contains "DENY" must NOT be recorded as a
+// denial, and a real DENY must always be a policy event.
+func TestRecordEgressFieldAnchoredClassification(t *testing.T) {
+	dir := t.TempDir()
+	writeExecPolicy(t, dir, "")
+	chdir(t, dir)
+	fr := &fakeRunner{probePresent: true, egressLog: []string{
+		"AGENTBOX-EGRESS ALLOW http DENY github.com:80",                // method literally "DENY" — still ALLOW
+		"AGENTBOX-EGRESS DENY connect ALLOW.example:443: not in allow", // host contains ALLOW — still DENY
+	}}
+	orig := selectRunnerFn
+	selectRunnerFn = func(ep policy.EffectivePolicy, o runOptions) (runtime.Runner, error) { return fr, nil }
+	t.Cleanup(func() { selectRunnerFn = orig })
+
+	r := NewRoot("test", "none", "now")
+	if err := r.cmdRun(context.Background(), []string{"do a thing"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	s := latestSession(t, dir)
+	for _, e := range s.PolicyEvents {
+		if strings.Contains(e.Detail, "ALLOW http DENY github.com") {
+			t.Errorf("an ALLOW line was misclassified as a denial: %v", e)
+		}
+	}
+	foundRealDeny := false
+	for _, e := range s.PolicyEvents {
+		if strings.Contains(e.Detail, "ALLOW.example:443") {
+			foundRealDeny = true
+		}
+	}
+	if !foundRealDeny {
+		t.Errorf("a real DENY (host containing ALLOW) must be a policy event: %v", s.PolicyEvents)
 	}
 }

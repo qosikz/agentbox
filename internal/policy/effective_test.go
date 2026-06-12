@@ -99,17 +99,37 @@ func TestDefaultPolicyIsSafe(t *testing.T) {
 	}
 }
 
-func TestAllowlistNotEnforced(t *testing.T) {
-	cfg := config.DefaultPolicy()
-	cfg.Network.Mode = "allowlist"
-	ep := BuildEffectivePolicy(cfg, "", Overrides{})
-	if ep.EnforcedNetwork() != "deny" {
-		t.Errorf("allowlist should collapse to deny enforcement, got %q", ep.EnforcedNetwork())
-	}
-	notes := strings.Join(ep.EnforcementNotes(), " ")
-	if !strings.Contains(notes, "allowlist") {
-		t.Errorf("expected honesty note about allowlist, got %q", notes)
-	}
+func TestAllowlistEnforcement(t *testing.T) {
+	t.Run("container isolation enforces allowlist", func(t *testing.T) {
+		cfg := config.DefaultPolicy() // isolation: container
+		cfg.Network.Mode = "allowlist"
+		ep := BuildEffectivePolicy(cfg, "", Overrides{})
+		if ep.EnforcedNetwork() != "allowlist" {
+			t.Errorf("container allowlist should be enforced as allowlist, got %q", ep.EnforcedNetwork())
+		}
+		notes := strings.Join(ep.EnforcementNotes(), " ")
+		if !strings.Contains(notes, "egress proxy") {
+			t.Errorf("expected egress-proxy enforcement note, got %q", notes)
+		}
+		// Allowlist is a SAFE mode: it must not trigger unsafe confirmation.
+		if ep.RequiresUnsafeConfirmation() {
+			t.Errorf("allowlist must not require unsafe confirmation: %v", ep.UnsafeReasons())
+		}
+	})
+
+	t.Run("local isolation cannot enforce allowlist", func(t *testing.T) {
+		cfg := config.DefaultPolicy()
+		cfg.Network.Mode = "allowlist"
+		cfg.Runtime.Isolation = "local"
+		ep := BuildEffectivePolicy(cfg, "", Overrides{})
+		if ep.EnforcedNetwork() != "deny" {
+			t.Errorf("local allowlist should collapse to deny, got %q", ep.EnforcedNetwork())
+		}
+		notes := strings.Join(ep.EnforcementNotes(), " ")
+		if !strings.Contains(notes, "cannot be enforced in local mode") {
+			t.Errorf("expected local-mode honesty note, got %q", notes)
+		}
+	})
 }
 
 func TestAllowHostHomeRelaxesHomeDenies(t *testing.T) {

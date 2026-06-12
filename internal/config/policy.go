@@ -188,8 +188,8 @@ agent:
       - "{{ task }}"
 
 network:
-  mode: deny                  # deny | allowlist | open (open is unsafe)
-  allow:
+  mode: deny                  # deny | allowlist (enforced egress proxy) | open (unsafe)
+  allow:                      # used by allowlist mode; each entry covers its subdomains
     - github.com
     - pypi.org
     - registry.npmjs.org

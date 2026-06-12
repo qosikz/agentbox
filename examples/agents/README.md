@@ -40,16 +40,19 @@ Instead, AgentBox injects the key at **runtime** and only when policy allows it:
 The MCP server and the cross-harness skill never expose unsafe flags, so a
 harness driving AgentBox cannot escalate past your policy.
 
-## ⚠️ Network: real agents need it; allowlist is not enforced yet
+## Network: the enforced allowlist
 
-A real agent must reach its model API. AgentBox's `network.mode: allowlist` is
-**not enforced yet** (there is no egress proxy/firewall) — it falls back to
-`deny` and says so. So a real agent run currently needs `network: open`, which
-is an explicit **unsafe** mode (`--yes-unsafe` or interactive confirmation).
+A real agent reaches its model API through the **enforced** allowlist: set
+`network.mode: allowlist` with your provider's API domains and the agent can
+call those and nothing else. Enforcement is structural, not advisory — the
+agent container's only interface is a per-run isolated network whose sole
+exit is an egress proxy restricted to your domains; traffic that ignores the
+proxy (and external DNS) fails closed. Every allowed/denied connection is
+recorded in the session. No unsafe confirmation is needed.
 
-Enforced allowlist egress is the next safety milestone; until then, treat a
-real agent run as network-open and rely on container isolation + secret
-redaction for protection.
+Caveats (honest): HTTP(S) only — SSH/raw-TCP cannot leave the sandbox at all;
+local (`--runtime local`) runs have no network enforcement; an allowlisted
+domain is a permitted channel by definition, so keep the list minimal.
 
 ## Build the images
 
@@ -90,7 +93,7 @@ path). `codex exec` reads `CODEX_API_KEY` for a single non-interactive run.
 ```bash
 export CODEX_API_KEY=sk-...
 agentbox run "add a test for parseConfig" \
-  --policy ../agentbox.codex.yaml --yes-unsafe
+  --policy ../agentbox.codex.yaml          # no unsafe flag: allowlist is enforced
 ```
 
 Codex ships its own Landlock/Seatbelt sandbox that can conflict with the

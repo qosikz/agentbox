@@ -564,3 +564,129 @@ func TestLocalRunner_ProbeBinaryUsesHostPath(t *testing.T) {
 		t.Errorf("local probe for missing binary = (%v,%v), want (false,nil)", ok, err)
 	}
 }
+
+// --- Egress allowlist orchestration (pure helpers, no engine required) ---
+
+func TestBuildProxySidecarArgs_Hardened(t *testing.T) {
+	args := BuildProxySidecarArgs("img:latest", "abox-egress-x", "abox-net-x", "/tmp/x/agentbox-netproxy", []string{"api.openai.com", "github.com"})
+	for _, want := range [][2]string{
+		{"--name", "abox-egress-x"},
+		{"--network", "abox-net-x"},
+		{"--cap-drop", "ALL"},
+		{"--security-opt", "no-new-privileges"},
+		{"--user", "10001:10001"},
+		{"--pids-limit", "256"},
+		{"--entrypoint", "/agentbox-netproxy"},
+		{"-allow", "api.openai.com,github.com"},
+	} {
+		if !containsPair(args, want[0], want[1]) {
+			t.Errorf("sidecar args missing %q %q: %v", want[0], want[1], args)
+		}
+	}
+	if !contains(args, "--read-only") {
+		t.Errorf("sidecar filesystem must be read-only: %v", args)
+	}
+	// The sidecar must run detached, self-remove, and mount ONLY the proxy
+	// binary read-only — never the workspace, never the docker socket.
+	if !contains(args, "-d") || !contains(args, "--rm") {
+		t.Errorf("sidecar must be detached and self-removing: %v", args)
+	}
+	mounts := 0
+	for i, a := range args {
+		if a == "-v" {
+			mounts++
+			if !strings.HasSuffix(args[i+1], ":/agentbox-netproxy:ro") {
+				t.Errorf("unexpected sidecar mount %q", args[i+1])
+			}
+		}
+	}
+	if mounts != 1 {
+		t.Errorf("sidecar must have exactly one (read-only proxy) mount, got %d: %v", mounts, args)
+	}
+	if contains(args, "--privileged") || containsSubstr(args, "docker.sock") {
+		t.Errorf("sidecar must never be privileged or socket-mounted: %v", args)
+	}
+}
+
+func TestApplyAllowlistNetwork(t *testing.T) {
+	spec := secureSpec()
+	spec.NetworkMode = "allowlist"
+	args := BuildDockerArgs(spec, CommandSpec{Executable: "agent-cli"})
+
+	out := ApplyAllowlistNetwork(args, "abox-net-1", "192.168.9.2:3128")
+	if !containsPair(out, "--network", "abox-net-1") {
+		t.Errorf("agent must be rewired onto the internal network: %v", out)
+	}
+	if containsPair(out, "--network", "none") {
+		t.Errorf("placeholder network must be replaced: %v", out)
+	}
+	// DNS must be sunk in the agent so the DNS-tunnel side channel is closed.
+	if !containsPair(out, "--dns", "0.0.0.0") {
+		t.Errorf("agent DNS must be sunk (--dns 0.0.0.0): %v", out)
+	}
+	for _, e := range []string{
+		"HTTP_PROXY=http://192.168.9.2:3128",
+		"HTTPS_PROXY=http://192.168.9.2:3128",
+		"NO_PROXY=localhost,127.0.0.1",
+	} {
+		if !containsPair(out, "-e", e) {
+			t.Errorf("missing proxy env %q: %v", e, out)
+		}
+	}
+	// Env must be injected BEFORE the image so docker treats it as an option.
+	imgIdx, envIdx := -1, -1
+	for i, a := range out {
+		if a == spec.Image {
+			imgIdx = i
+		}
+		if strings.HasPrefix(a, "HTTP_PROXY=") {
+			envIdx = i
+		}
+	}
+	if envIdx == -1 || imgIdx == -1 || envIdx > imgIdx {
+		t.Errorf("proxy env must precede the image (env@%d image@%d): %v", envIdx, imgIdx, out)
+	}
+
+	// Fail-safe: args without a "--network none" placeholder are returned
+	// unchanged (container stays isolated rather than falling open).
+	bridge := BuildDockerArgs(RuntimeSpec{Image: "i", NetworkMode: "open"}, CommandSpec{Executable: "x"})
+	if got := ApplyAllowlistNetwork(bridge, "n", "a:1"); len(got) != len(bridge) {
+		t.Errorf("args without the placeholder must pass through unchanged")
+	}
+}
+
+func TestAllowlistModeBuildsIsolatedPlaceholder(t *testing.T) {
+	spec := secureSpec()
+	spec.NetworkMode = "allowlist"
+	args := BuildDockerArgs(spec, CommandSpec{Executable: "x"})
+	if !containsPair(args, "--network", "none") {
+		t.Errorf("allowlist must emit the isolated placeholder (fail closed): %v", args)
+	}
+}
+
+func TestNormalizeArch(t *testing.T) {
+	tests := map[string]string{
+		"amd64": "amd64", "x86_64": "amd64", "X86_64": "amd64",
+		"arm64": "arm64", "aarch64": "arm64",
+		"mips": "", "": "",
+	}
+	for in, want := range tests {
+		if got := normalizeArch(in); got != want {
+			t.Errorf("normalizeArch(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestParseEgressLines(t *testing.T) {
+	logs := "2026/06/12 09:42:31 AGENTBOX-EGRESS READY listen=[::]:3128 allow=github.com\n" +
+		"noise line\n" +
+		"2026/06/12 09:42:33 AGENTBOX-EGRESS ALLOW connect github.com:443\n" +
+		"2026/06/12 09:42:34 AGENTBOX-EGRESS DENY connect gitlab.com:443: host is not in the network.allow list\n"
+	lines := parseEgressLines(logs)
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 3: %v", len(lines), lines)
+	}
+	if !strings.HasPrefix(lines[2], "AGENTBOX-EGRESS DENY connect gitlab.com:443") {
+		t.Errorf("timestamp should be stripped, got %q", lines[2])
+	}
+}

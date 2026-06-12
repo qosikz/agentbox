@@ -231,7 +231,11 @@ func computeUnsafeReasons(ep EffectivePolicy) []string {
 func enforcementNotes(ep EffectivePolicy) []string {
 	var notes []string
 	if ep.Network.Mode == "allowlist" {
-		notes = append(notes, "network allowlist is not enforced yet; the runtime applies deny and the domain list is advisory")
+		if ep.Runtime.Isolation == "local" {
+			notes = append(notes, "network allowlist cannot be enforced in local mode (no container network); local runs have no network restrictions at all")
+		} else {
+			notes = append(notes, "network allowlist is enforced via an egress proxy: HTTP(S) to allowed domains only, everything else fails closed inside an isolated network (non-HTTP protocols like SSH cannot leave the sandbox)")
+		}
 	}
 	if len(ep.Commands.Deny) > 0 {
 		notes = append(notes, "command deny list is best-effort and cannot stop an agent that spawns shells indirectly")
@@ -255,9 +259,11 @@ func (e EffectivePolicy) UnsafeReasons() []string { return e.unsafeReasons }
 func (e EffectivePolicy) EnforcementNotes() []string { return e.notes }
 
 // EnforcedNetwork returns the network mode actually enforced by the runtime.
-// Because allowlist is not yet enforced, it collapses to deny.
+// allowlist is enforced for container isolation (per-run internal network +
+// egress proxy); local isolation has no container network to enforce it with,
+// so it collapses to deny there (and the enforcement notes say so).
 func (e EffectivePolicy) EnforcedNetwork() string {
-	if e.Network.Mode == "allowlist" {
+	if e.Network.Mode == "allowlist" && e.Runtime.Isolation == "local" {
 		return "deny"
 	}
 	return e.Network.Mode

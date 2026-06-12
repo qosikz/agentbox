@@ -17,7 +17,8 @@ import (
 type RuntimeSpec struct {
 	Engine            string            // docker | podman | dryrun
 	Image             string            // container image
-	NetworkMode       string            // none | bridge (enforced mapping of policy)
+	NetworkMode       string            // none | bridge | allowlist (enforced mapping of policy)
+	AllowedDomains    []string          // egress allowlist (NetworkMode == "allowlist" only)
 	Workdir           string            // working directory inside the container
 	Env               map[string]string // allowlisted environment only
 	User              string            // non-root user, e.g. "10001:10001"
@@ -45,6 +46,10 @@ type RunResult struct {
 	// Description holds the human-readable plan of intended runtime actions
 	// (used by the dry-run runner so users can inspect what *would* happen).
 	Description []string
+	// EgressLog holds the egress proxy's audit lines (ALLOW/DENY per target)
+	// when NetworkMode == "allowlist". The CLI folds denials into the
+	// session's policy events.
+	EgressLog []string
 }
 
 // Runner executes a command under a RuntimeSpec.

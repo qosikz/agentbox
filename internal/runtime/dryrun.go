@@ -3,7 +3,11 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sort"
+	"strings"
+
+	"github.com/qosikz/agentbox/internal/netproxy"
 )
 
 // dryRunRunner is a Runner that never executes anything. Instead it renders a
@@ -36,7 +40,17 @@ func (dryRunRunner) Run(ctx context.Context, spec RuntimeSpec, command CommandSp
 
 	lines = append(lines, fmt.Sprintf("engine: %s", spec.Engine))
 	lines = append(lines, fmt.Sprintf("image: %s", spec.Image))
-	lines = append(lines, fmt.Sprintf("network: %s", spec.NetworkMode))
+	if spec.NetworkMode == "allowlist" {
+		// Don't assert enforcement unconditionally: a dev build without the
+		// embedded proxy would fail closed at run time. Check this build.
+		enforce := "would be enforced via egress proxy"
+		if !netproxy.Embedded(runtime.GOARCH) {
+			enforce = "NOT enforceable in this build — proxy not embedded; see `agentbox doctor`"
+		}
+		lines = append(lines, fmt.Sprintf("network: allowlist (%s: %s)", enforce, strings.Join(spec.AllowedDomains, ", ")))
+	} else {
+		lines = append(lines, fmt.Sprintf("network: %s", spec.NetworkMode))
+	}
 
 	if spec.User != "" {
 		lines = append(lines, fmt.Sprintf("user: %s (non-root)", spec.User))

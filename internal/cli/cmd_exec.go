@@ -175,6 +175,7 @@ func (r *Root) cmdExec(ctx context.Context, args []string) error {
 	if n := len(rec.Session.Commands); n > 0 {
 		rec.Session.Commands[n-1].ExitCode = res.ExitCode
 	}
+	recordEgress(rec, res.EgressLog)
 	rec.Event(session.EvCommandExecuted)
 
 	if ep.Budget.MaxRuntimeMinutes > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {

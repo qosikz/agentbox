@@ -86,7 +86,11 @@ commands. AgentBox puts deterministic guardrails around them:
   are redacted from logs.
 - **Filesystem** — sensitive paths (`.env`, `~/.ssh`, `~/.aws`, `~/.kube`, the
   Docker socket) are excluded from the workspace by default.
-- **Network** — denied by default; `open` requires explicit unsafe confirmation.
+- **Network** — denied by default. `allowlist` is **enforced** for container
+  runs: the agent's only interface is an isolated per-run network whose sole
+  exit is an egress proxy restricted to your `network.allow` domains — anything
+  else fails closed, and every allow/deny is recorded in the session. `open`
+  requires explicit unsafe confirmation.
 - **Runtime** — containers run as a non-root user with `--cap-drop ALL` and
   `--security-opt no-new-privileges`; never privileged, never the Docker socket.
   Works with Docker or Podman.
@@ -210,7 +214,8 @@ docker build -t agentbox/codex:latest -f examples/agents/codex.Dockerfile exampl
 # (Illustrative — Codex auth/sandbox specifics are version-dependent; the stub
 # below is the verified path. `codex exec` reads CODEX_API_KEY.)
 export CODEX_API_KEY=sk-...
-agentbox run "add a test for parseConfig" --policy examples/agentbox.codex.yaml --yes-unsafe
+agentbox run "add a test for parseConfig" --policy examples/agentbox.codex.yaml
+# (no unsafe flag: the enforced allowlist covers api.openai.com only)
 ```
 
 - **The API key is never in the image.** Image layers are immutable and would
@@ -218,10 +223,14 @@ agentbox run "add a test for parseConfig" --policy examples/agentbox.codex.yaml 
   AgentBox reads the key from your host env, injects it into the container only
   when `secrets.allow` lists it (and `secrets.deny` does not), and redacts its
   value from logs, diffs, and session metadata.
-- **Network caveat (honest):** a real agent must reach its model API, but
-  `network.mode: allowlist` is **not enforced yet** (no egress proxy) and falls
-  back to `deny`. So a real agent run currently needs `network: open` — an
-  explicit unsafe mode. Enforced allowlist egress is the next safety milestone.
+- **Network:** a real agent reaches its model API through the **enforced
+  allowlist** — set `network.mode: allowlist` with your provider's domains
+  (e.g. `api.openai.com`) and the agent can call that API and nothing else.
+  No unsafe confirmation needed; `network: open` is no longer required.
+  Caveats (honest): HTTP(S) only — non-HTTP protocols like SSH cannot leave
+  the sandbox at all (fail closed); local (`--runtime local`) runs have no
+  network enforcement; enforcement needs the egress proxy embedded in released
+  binaries (`agentbox doctor` shows `egress-proxy`).
 
 Prove the whole path for free with the bundled **stub agent** — no key, no
 network, no spend:
@@ -343,8 +352,11 @@ The security acceptance tests (§8) live in `internal/cli/security_test.go`.
 
 ## MVP limitations (honest)
 
-- `network: allowlist` is **not** enforced yet (no proxy/firewall); it falls back
-  to `deny` and the domain list is advisory.
+- `network: allowlist` is enforced for **container** runs only (HTTP/HTTPS via
+  the egress proxy; everything else fails closed). Local runs have no network
+  enforcement at all. DNS tunneling is closed structurally — the agent's DNS is
+  sunk (`--dns 0.0.0.0`) and the proxy resolves allowlisted names — so it does
+  not depend on the Docker version's internal-network DNS behavior.
 - `commands.deny` is best-effort and cannot stop an agent that spawns shells indirectly.
 - `budget` token/USD caps depend on adapter support and are reported as `unknown`
   otherwise (`max_runtime_minutes` is enforced).

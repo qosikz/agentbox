@@ -179,12 +179,11 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 	if ep.EnforcedNetwork() == "deny" {
 		rec.PolicyBlocked("outbound network access (network=" + ep.Network.Mode + ")")
 		// Honesty note, conditional by design: a baked-in agent that must reach
-		// a model API cannot do so under network=deny, and allowlist egress is
-		// not enforced yet — such a run needs network: open (unsafe). Phrased as
-		// "if it needs to reach a remote API" because many agents/tasks (and the
-		// bundled stub fixture) run fully offline and need no change.
+		// a model API cannot do so under network=deny. Phrased as "if it needs
+		// to reach a remote API" because many agents/tasks (and the bundled
+		// stub fixture) run fully offline and need no change.
 		if !o.dryRun && ep.Runtime.Isolation != "local" && len(ep.Secrets.Allow) > 0 {
-			rec.Logf("note: network is denied; if this agent needs to reach a remote API it will fail (allowlist egress is not enforced yet — a real agent run that calls out needs network: open, which is unsafe). Offline agents are unaffected.")
+			rec.Logf("note: network is denied; if this agent needs to reach a remote API it will fail. Use network: allowlist with your provider's API domains (enforced via egress proxy) — network: open (unsafe) is no longer required. Offline agents are unaffected.")
 		}
 	}
 
@@ -266,6 +265,7 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 	if n := len(rec.Session.Commands); n > 0 {
 		rec.Session.Commands[n-1].ExitCode = res.ExitCode
 	}
+	recordEgress(rec, res.EgressLog)
 	rec.Event(session.EvCommandExecuted)
 	// Budget kill first: depending on the runner, a deadline kill surfaces as
 	// an error (docker wrap) or as a clean exit code -1 (process killed by
@@ -307,6 +307,7 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 			tr, _ := runner.Run(ctx, spec, runtime.CommandSpec{
 				Executable: "sh", Args: []string{"-lc", tc}, Env: agentEnv, WorkingDir: execRoot,
 			})
+			recordEgress(rec, tr.EgressLog)
 			// A budget kill mid-tests is a budget event, not a test failure.
 			if budgetHit() {
 				return budgetExceeded()
@@ -488,8 +489,15 @@ func buildRedactor(ep policy.EffectivePolicy) *secrets.Redactor {
 
 func buildRuntimeSpec(ep policy.EffectivePolicy, plan workspace.Plan, root string, env map[string]string, o runOptions) runtime.RuntimeSpec {
 	netMode := "none"
-	if ep.EnforcedNetwork() == "open" {
+	var allowedDomains []string
+	switch ep.EnforcedNetwork() {
+	case "open":
 		netMode = "bridge"
+	case "allowlist":
+		// Enforced by the runner: per-run internal network + egress proxy
+		// restricted to these domains. See internal/runtime/allowlist.go.
+		netMode = "allowlist"
+		allowedDomains = ep.Network.Allow
 	}
 
 	// Mount only the resolved write paths (read-write). The repository root is
@@ -518,6 +526,7 @@ func buildRuntimeSpec(ep policy.EffectivePolicy, plan workspace.Plan, root strin
 		Engine:            engineLabel(ep),
 		Image:             ep.Runtime.Image,
 		NetworkMode:       netMode,
+		AllowedDomains:    allowedDomains,
 		Workdir:           root,
 		Env:               specEnv,
 		User:              "10001:10001",       // non-root
@@ -531,6 +540,29 @@ func buildRuntimeSpec(ep policy.EffectivePolicy, plan workspace.Plan, root strin
 // selectRunnerFn is a seam so tests can inject a runner without a container
 // engine. Production always uses selectRunner.
 var selectRunnerFn = selectRunner
+
+// recordEgress folds the egress proxy's audit lines into the session: denials
+// become policy-blocked events (the security record), allows become log lines.
+// Classification is anchored to the verb field (the token right after the
+// audit prefix) rather than a free substring, so an allowed request whose
+// method/host text happens to contain "DENY"/"ALLOW" cannot be mislabeled.
+func recordEgress(rec *session.Recorder, egressLog []string) {
+	const prefix = "AGENTBOX-EGRESS "
+	for _, line := range egressLog {
+		i := strings.Index(line, prefix)
+		if i < 0 {
+			continue
+		}
+		rest := line[i+len(prefix):]
+		verb, _, _ := strings.Cut(rest, " ")
+		switch verb {
+		case "DENY":
+			rec.PolicyBlocked("egress " + rest)
+		case "ALLOW":
+			rec.Logf("%s", strings.TrimSpace(line[i:]))
+		}
+	}
+}
 
 // preflightAgent verifies the agent binary is reachable in the environment that
 // will run it. Local isolation executes on the host, so the binary must be on

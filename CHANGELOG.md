@@ -2,6 +2,71 @@
 
 All notable changes to AgentBox are documented here.
 
+## v0.4.0 — 2026-06-12 (enforced network allowlist)
+
+The flagship safety milestone: `network.mode: allowlist` is now **enforced**,
+not advisory. A real agent run no longer needs `network: open` — allowlist the
+provider's API domains and the agent can reach those and nothing else.
+
+### Added
+- **Egress enforcement** for container runs. Two cooperating mechanisms:
+  1. The agent container's only interface is a per-run `--internal` container
+     network with no default route — direct egress and external DNS fail
+     closed, so traffic that ignores the proxy cannot leave at all.
+  2. An egress-proxy sidecar (dual-homed onto the external network) is the only
+     path out and forwards only HTTP(S) whose target host matches
+     `network.allow`. Each entry covers the domain and its subdomains; ports
+     80/443 only; IP-literal targets always denied; targets resolving to
+     private/loopback/link-local ranges refused (anti-SSRF backstop).
+- `internal/netproxy` + `cmd/netproxy`: a stdlib-only filtering forward proxy
+  (HTTP CONNECT + absolute-form HTTP) with structured ALLOW/DENY audit lines.
+  Static linux builds (amd64/arm64) are **embedded into the agentbox binary**
+  by `make build`/`make release` and run in the sidecar from the user's own
+  runtime image — no extra image or binary to install.
+- Every proxy ALLOW/DENY is harvested into the session: denials become policy
+  events (`egress DENY connect host:443: ...`), allows become audit log lines.
+- The proxy sidecar carries the same hardening as the agent container:
+  non-root 10001, `--cap-drop ALL`, no-new-privileges, `--rm`, and mounts ONLY
+  the proxy binary read-only — never the workspace.
+- `agentbox doctor` reports `egress-proxy` embed status (allowlist
+  enforceability) per architecture.
+- `examples/agentbox.codex.yaml` now uses `network: allowlist` with
+  `api.openai.com` — **no `--yes-unsafe` required** for a real agent run.
+
+### Changed
+- `EnforcedNetwork()` no longer collapses allowlist to deny for container
+  isolation; `policy check` shows `allowlist (enforced: allowlist)` with an
+  honest enforcement note. Local isolation still collapses (no container
+  network to enforce with) and says so.
+- Allowlist setup failure fails the run — enforcement never falls open. If the
+  internal-network swap is somehow skipped, the container stays on the
+  isolated `none` network (fail closed by construction).
+- The network=deny honesty note now points to allowlist instead of open.
+
+### Hardening (from adversarial review)
+- Anti-SSRF backstop refuses an explicit reserved-range set (loopback, RFC1918,
+  CGNAT 100.64/10, link-local/metadata, benchmarking, TEST-NETs, 240/4, ULA,
+  NAT64 64:ff9b::/96, 6to4, Teredo, and IPv4-in-IPv6 forms) — not just
+  `IsPrivate()`.
+- DNS-tunnel exfiltration is closed **structurally**: the agent's resolver is
+  sunk (`--dns 0.0.0.0`); the proxy resolves allowlisted names. Independent of
+  the daemon's internal-network DNS behavior.
+- Proxy egress leg uses a **dedicated per-run external network**, not the
+  shared default bridge, so unrelated containers can't use it as an open relay.
+- CONNECT tunnels have an idle deadline + a concurrency cap; the HTTP server has
+  read/idle timeouts and a header-size cap; the sidecar runs read-only and
+  PID-capped — bounding self-inflicted DoS of the egress path.
+- Egress audit lines are classified by their verb field (not substring), and
+  the dry-run plan only claims enforcement when the proxy is actually embedded.
+
+### Limitations (honest)
+- Container isolation only; `--runtime local` runs have no network enforcement.
+- HTTP(S) only: SSH and raw TCP cannot leave the sandbox at all (fail closed).
+- An allowlisted domain is a permitted channel by definition — keep the list
+  minimal (an allowlisted DoH/DNS resolver would re-open a DNS channel).
+- Verified end-to-end on Docker; podman uses identical CLI arguments but is
+  less tested.
+
 ## v0.3.2 — 2026-06-12 (public-home prep)
 
 ### Changed

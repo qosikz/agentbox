@@ -67,6 +67,20 @@ func (r containerRunner) Run(ctx context.Context, spec RuntimeSpec, command Comm
 	name := containerName()
 	args := insertContainerName(BuildDockerArgs(spec, command), name)
 
+	// Allowlist mode: provision the per-run internal network + egress proxy
+	// sidecar, rewire the agent onto it, and tear everything down at the end.
+	// Setup failure fails the run — enforcement must never fall open.
+	var egress *egressSession
+	if spec.NetworkMode == "allowlist" {
+		es, eerr := r.setupAllowlist(ctx, spec)
+		if eerr != nil {
+			return RunResult{ExitCode: -1}, eerr
+		}
+		defer es.teardown()
+		egress = es
+		args = ApplyAllowlistNetwork(args, es.network, es.proxyAddr)
+	}
+
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, r.engine, args...)
 	cmd.Stdout = &stdout
@@ -89,6 +103,11 @@ func (r containerRunner) Run(ctx context.Context, spec RuntimeSpec, command Comm
 	result := RunResult{
 		Stdout: stdout.String(),
 		Stderr: stderr.String(),
+	}
+	// Harvest the egress audit log on every exit path so denials reach the
+	// session even when the agent fails.
+	if egress != nil {
+		result.EgressLog = egress.collectLog()
 	}
 
 	if err != nil {
@@ -304,10 +323,13 @@ func BuildDockerArgs(spec RuntimeSpec, command CommandSpec) []string {
 
 	// Network: default-deny. Only an explicit open/bridge request enables the
 	// bridge network; everything else (including unknown values) is isolated.
+	// "allowlist" also emits the isolated placeholder here — the runner swaps
+	// it for the per-run internal network via ApplyAllowlistNetwork, so if the
+	// swap ever fails to happen the container stays at "none" (fail closed).
 	switch spec.NetworkMode {
 	case "open", "bridge":
 		args = append(args, "--network", "bridge")
-	default: // "none", "deny", "" and any unrecognized value
+	default: // "none", "deny", "allowlist", "" and any unrecognized value
 		args = append(args, "--network", "none")
 	}
 

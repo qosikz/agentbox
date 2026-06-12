@@ -7,11 +7,11 @@
 #
 #   docker build -t agentbox/codex:latest -f examples/agents/codex.Dockerfile examples/agents
 #   export CODEX_API_KEY=sk-...            # see note below
-#   agentbox run "add a test for parseConfig" --policy examples/agentbox.codex.yaml --yes-unsafe
+#   agentbox run "add a test for parseConfig" --policy examples/agentbox.codex.yaml
 #
-# Why --yes-unsafe? A real agent must reach the model API, but network.mode
-# allowlist is NOT enforced yet (no egress proxy), so reaching the API requires
-# network: open, which is an explicit unsafe mode. See ./agents/README.md.
+# No unsafe flag needed: network.mode=allowlist is ENFORCED (per-run isolated
+# network + egress proxy), so the agent can reach its model API and nothing
+# else. Every allowed/denied connection is recorded in the session.
 
 runtime:
   isolation: container
@@ -23,7 +23,13 @@ agent:
   default: codex                        # runs: codex exec --sandbox workspace-write "{{ task }}"
 
 network:
-  mode: open                            # UNSAFE: required today so codex can reach the API
+  mode: allowlist                       # enforced: HTTP(S) to these domains only
+  allow:
+    - api.openai.com                    # model API (codex exec with CODEX_API_KEY)
+    # Add registries only if the TASK needs them (keep the list minimal):
+    # - registry.npmjs.org
+    # - pypi.org
+    # - files.pythonhosted.org
 
 secrets:
   mode: explicit

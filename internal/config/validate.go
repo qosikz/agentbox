@@ -50,7 +50,12 @@ func (p Policy) Check() CheckResult {
 	case "open":
 		r.UnsafeOptions = append(r.UnsafeOptions, "network.mode=open allows unrestricted outbound network access")
 	case "allowlist":
-		r.UnsupportedModes = append(r.UnsupportedModes, "network.mode=allowlist is not yet enforced (no proxy/firewall); the runtime falls back to deny and reports honestly")
+		if len(p.Network.Allow) == 0 {
+			r.Warnings = append(r.Warnings, "network.mode=allowlist with an empty network.allow list denies all egress; add the domains your agent needs")
+		}
+		if p.Runtime.Isolation == "local" {
+			r.UnsupportedModes = append(r.UnsupportedModes, "network.mode=allowlist cannot be enforced with runtime.isolation=local; container isolation is required for egress enforcement")
+		}
 	}
 
 	// Secrets.

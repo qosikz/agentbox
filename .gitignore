@@ -4,3 +4,6 @@ dist/
 *.test
 coverage.out
 .DS_Store
+
+# Embedded egress-proxy artifacts (built by `make proxy`, embedded at build time)
+internal/netproxy/embedded/netproxy_linux_*
