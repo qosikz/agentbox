@@ -568,7 +568,7 @@ func TestLocalRunner_ProbeBinaryUsesHostPath(t *testing.T) {
 // --- Egress allowlist orchestration (pure helpers, no engine required) ---
 
 func TestBuildProxySidecarArgs_Hardened(t *testing.T) {
-	args := BuildProxySidecarArgs("img:latest", "abox-egress-x", "abox-net-x", "/tmp/x/agentbox-netproxy", []string{"api.openai.com", "github.com"})
+	args := BuildProxySidecarArgs("img:latest", "abox-egress-x", "abox-net-x", "/tmp/x/agentbox-netproxy", []string{"api.openai.com", "github.com"}, nil)
 	for _, want := range [][2]string{
 		{"--name", "abox-egress-x"},
 		{"--network", "abox-net-x"},
@@ -605,6 +605,28 @@ func TestBuildProxySidecarArgs_Hardened(t *testing.T) {
 	}
 	if contains(args, "--privileged") || containsSubstr(args, "docker.sock") {
 		t.Errorf("sidecar must never be privileged or socket-mounted: %v", args)
+	}
+}
+
+func TestBuildProxySidecarArgs_CustomPorts(t *testing.T) {
+	args := BuildProxySidecarArgs("img:latest", "abox-egress-x", "abox-net-x", "/tmp/x/agentbox-netproxy",
+		[]string{"my-service.internal"}, []int{443, 8428})
+	if !containsPair(args, "-ports", "443,8428") {
+		t.Errorf("custom ports must be forwarded to the proxy as -ports: %v", args)
+	}
+	// The domain allowlist is independent of ports and must still be present.
+	if !containsPair(args, "-allow", "my-service.internal") {
+		t.Errorf("domain allowlist must still be forwarded: %v", args)
+	}
+}
+
+func TestBuildProxySidecarArgs_NoPorts(t *testing.T) {
+	// Empty/nil ports must OMIT the -ports flag so the proxy keeps its secure
+	// default (80, 443) — this is the backward-compatible path.
+	args := BuildProxySidecarArgs("img:latest", "abox-egress-x", "abox-net-x", "/tmp/x/agentbox-netproxy",
+		[]string{"github.com"}, nil)
+	if contains(args, "-ports") {
+		t.Errorf("nil ports must not pass -ports (proxy defaults to 80,443): %v", args)
 	}
 }
 

@@ -57,6 +57,14 @@ func (p Policy) Check() CheckResult {
 			r.UnsupportedModes = append(r.UnsupportedModes, "network.mode=allowlist cannot be enforced with runtime.isolation=local; container isolation is required for egress enforcement")
 		}
 	}
+	for _, port := range p.Network.Ports {
+		if port < 1 || port > 65535 {
+			r.Errors = append(r.Errors, fmt.Sprintf("network.ports entry %d is invalid (expected 1-65535)", port))
+		}
+	}
+	if len(p.Network.Ports) > 0 && p.Network.Mode != "allowlist" {
+		r.Warnings = append(r.Warnings, "network.ports only applies to network.mode=allowlist; it is ignored otherwise")
+	}
 
 	// Secrets.
 	if p.Secrets.Mode != "explicit" {

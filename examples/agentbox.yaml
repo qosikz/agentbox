@@ -17,6 +17,9 @@ network:
     - github.com
     - pypi.org
     - registry.npmjs.org
+  # ports:               # optional extra egress ports for allowlist mode (default: 80, 443)
+  #   - 8428             # WARNING: non-80/443 ports widen egress to ANY TCP toward your
+  #                      # allowlisted host:port, not just HTTP(S). See SECURITY.md.
 
 filesystem:
   readonly:

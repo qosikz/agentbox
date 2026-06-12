@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/qosikz/agentbox/internal/netproxy"
@@ -17,6 +18,7 @@ import (
 func main() {
 	listen := flag.String("listen", ":3128", "address to listen on")
 	allow := flag.String("allow", "", "comma-separated domain allowlist (each entry covers its subdomains)")
+	portsStr := flag.String("ports", "", "comma-separated extra egress ports (empty => default 80,443)")
 	flag.Parse()
 
 	var domains []string
@@ -26,12 +28,26 @@ func main() {
 		}
 	}
 
+	var ports []int
+	for _, ps := range strings.Split(*portsStr, ",") {
+		if ps = strings.TrimSpace(ps); ps == "" {
+			continue
+		}
+		n, err := strconv.Atoi(ps)
+		if err != nil || n < 1 || n > 65535 {
+			fmt.Fprintf(os.Stderr, "netproxy: invalid -ports value %q (expected 1-65535)\n", ps)
+			os.Exit(1)
+		}
+		ports = append(ports, n)
+	}
+
 	// Audit lines go to stdout so the container runtime captures them and the
 	// AgentBox CLI can fold denials into the session's policy events.
 	logger := log.New(os.Stdout, "", log.LstdFlags|log.LUTC)
 	p, err := netproxy.New(netproxy.Config{
 		Listen: *listen,
 		Allow:  domains,
+		Ports:  ports,
 		Logf:   func(format string, args ...any) { logger.Printf(format, args...) },
 	})
 	if err != nil {

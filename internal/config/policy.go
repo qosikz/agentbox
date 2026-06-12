@@ -57,6 +57,11 @@ type CustomAgentConfig struct {
 type NetworkPolicy struct {
 	Mode  string   `yaml:"mode"` // deny | allowlist | open
 	Allow []string `yaml:"allow"`
+	// Ports lists additional egress ports permitted in allowlist mode. Empty
+	// means the secure default (80 and 443). Opening other ports widens egress
+	// to arbitrary TCP toward allowlisted hosts on those ports — not just
+	// HTTP(S). See SECURITY.md.
+	Ports []int `yaml:"ports"`
 }
 
 // FilesystemPolicy controls which paths are readable, writable, and denied.
@@ -193,6 +198,9 @@ network:
     - github.com
     - pypi.org
     - registry.npmjs.org
+  # ports:                    # optional: extra egress ports for allowlist mode (default: 80, 443)
+  #   - 8428                  # WARNING: opening non-80/443 ports widens egress to ANY TCP toward
+  #                           # your allowlisted host:port, not just HTTP(S). See SECURITY.md.
 
 filesystem:
   readonly:

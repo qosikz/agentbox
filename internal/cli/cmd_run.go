@@ -490,14 +490,16 @@ func buildRedactor(ep policy.EffectivePolicy) *secrets.Redactor {
 func buildRuntimeSpec(ep policy.EffectivePolicy, plan workspace.Plan, root string, env map[string]string, o runOptions) runtime.RuntimeSpec {
 	netMode := "none"
 	var allowedDomains []string
+	var allowedPorts []int
 	switch ep.EnforcedNetwork() {
 	case "open":
 		netMode = "bridge"
 	case "allowlist":
 		// Enforced by the runner: per-run internal network + egress proxy
-		// restricted to these domains. See internal/runtime/allowlist.go.
+		// restricted to these domains (and ports). See internal/runtime/allowlist.go.
 		netMode = "allowlist"
 		allowedDomains = ep.Network.Allow
+		allowedPorts = ep.Network.Ports
 	}
 
 	// Mount only the resolved write paths (read-write). The repository root is
@@ -527,6 +529,7 @@ func buildRuntimeSpec(ep policy.EffectivePolicy, plan workspace.Plan, root strin
 		Image:             ep.Runtime.Image,
 		NetworkMode:       netMode,
 		AllowedDomains:    allowedDomains,
+		AllowedPorts:      allowedPorts,
 		Workdir:           root,
 		Env:               specEnv,
 		User:              "10001:10001",       // non-root

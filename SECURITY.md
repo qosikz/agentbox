@@ -35,9 +35,12 @@ boundaries **and the honest limitations** are, in short:
 - **Secrets** — the host environment is not forwarded; only allowlisted names
   reach the sandbox; values are redacted from logs, diffs, and sessions.
 - **Network** — `deny` by default. `allowlist` is **enforced** for container
-  runs via a per-run internal network + egress proxy (HTTP/HTTPS to allowed
-  domains only; everything else, including DNS, fails closed). `open` is an
-  explicit unsafe opt-in.
+  runs via a per-run internal network + egress proxy (allowed domains on ports
+  80/443 only; everything else, including DNS and IP-literal/reserved targets,
+  fails closed). `network.ports` can permit additional ports — this widens
+  egress to arbitrary TCP toward your allowlisted host:port (still domain- and
+  anti-SSRF-checked), so it is an explicit, opt-in choice. `open` is an explicit
+  unsafe opt-in.
 - **Runtime** — non-root, `--cap-drop ALL`, `--security-opt no-new-privileges`,
   never privileged, never the Docker socket.
 

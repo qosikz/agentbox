@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,7 +87,7 @@ func (r containerRunner) setupAllowlist(ctx context.Context, spec RuntimeSpec) (
 		return es, fmt.Errorf("creating external network for egress proxy: %s", firstLine(out, cerr))
 	}
 	// Proxy sidecar on the internal network...
-	args := BuildProxySidecarArgs(spec.Image, es.proxyCtr, es.network, binPath, spec.AllowedDomains)
+	args := BuildProxySidecarArgs(spec.Image, es.proxyCtr, es.network, binPath, spec.AllowedDomains, spec.AllowedPorts)
 	if out, cerr := r.engineCmd(ctx, args...); cerr != nil {
 		return es, fmt.Errorf("starting egress proxy sidecar: %s", firstLine(out, cerr))
 	}
@@ -256,8 +257,8 @@ func normalizeArch(s string) string {
 // ONLY the proxy binary mounted (read-only) — never the workspace. The
 // filesystem is read-only and process/PID count is capped as defense in depth.
 // PURE.
-func BuildProxySidecarArgs(image, name, network, binPath string, domains []string) []string {
-	return []string{
+func BuildProxySidecarArgs(image, name, network, binPath string, domains []string, ports []int) []string {
+	args := []string{
 		"run", "-d", "--rm",
 		"--name", name,
 		"--network", network,
@@ -272,6 +273,16 @@ func BuildProxySidecarArgs(image, name, network, binPath string, domains []strin
 		"-listen", ":3128",
 		"-allow", strings.Join(domains, ","),
 	}
+	// Forward extra ports only when set; an empty list keeps the proxy's secure
+	// default (80, 443). The domain allowlist and anti-SSRF guards still apply.
+	if len(ports) > 0 {
+		strs := make([]string, len(ports))
+		for i, p := range ports {
+			strs[i] = strconv.Itoa(p)
+		}
+		args = append(args, "-ports", strings.Join(strs, ","))
+	}
+	return args
 }
 
 // ApplyAllowlistNetwork rewires agent-container args produced by

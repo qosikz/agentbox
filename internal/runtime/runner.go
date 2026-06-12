@@ -19,6 +19,7 @@ type RuntimeSpec struct {
 	Image             string            // container image
 	NetworkMode       string            // none | bridge | allowlist (enforced mapping of policy)
 	AllowedDomains    []string          // egress allowlist (NetworkMode == "allowlist" only)
+	AllowedPorts      []int             // extra egress ports (allowlist only); empty => proxy default 80,443
 	Workdir           string            // working directory inside the container
 	Env               map[string]string // allowlisted environment only
 	User              string            // non-root user, e.g. "10001:10001"
