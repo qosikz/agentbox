@@ -16,10 +16,10 @@ subagents before trusting them. Via `agentbox exec`, an MCP server, or a
 cross-harness skill.
 
 <p align="center">
-  <img src="demo/egress.gif" alt="AgentBox enforces network egress — the agent reaches an allowlisted domain, DNS is dead, everything else fails closed, and every attempt is in the audit trail" width="860">
+  <img src="demo/exfil.gif" alt="A sandboxed agent holds a live API key but cannot leak it — the attacker host is refused at the egress proxy (fail closed), and even when the agent dumps the key into its own output the saved audit record redacts it" width="860">
 </p>
 
-> _Enforced egress in ~60s: allowlist one domain — the sandbox reaches it and **nothing else**, with every attempt audited. ([how it's recorded](demo/))_
+> _A sandboxed agent holds a **live API key** — and has nowhere to leak it. Your one allowed API stays reachable; the attacker host is refused at the proxy (fail closed); and even when the agent dumps the key into its output, the audit record **redacts** it. ~60s, all real. ([how it's recorded](demo/))_
 
 ```bash
 agentbox run "fix failing tests"
@@ -106,6 +106,13 @@ commands. AgentBox puts deterministic guardrails around them:
   Works with Docker or Podman.
 - **MCP** — a static scanner flags dangerous MCP server capabilities before you trust them.
 - **Audit** — every run is recorded under `.agentbox/sessions/<id>/`.
+
+The enforced-egress mechanics on their own — allowlist one domain, the sandbox
+reaches it and **nothing else**, DNS is dead, every attempt audited:
+
+<p align="center">
+  <img src="demo/egress.gif" alt="AgentBox enforces network egress — the agent reaches an allowlisted domain, DNS is dead, everything else fails closed, and every attempt is in the audit trail" width="820">
+</p>
 
 AgentBox does not make an unsafe agent magically safe. It creates guardrails, and
 it is honest about what it does and does not enforce.

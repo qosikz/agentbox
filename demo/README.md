@@ -1,15 +1,35 @@
-# AgentBox demo
+# AgentBox demos
 
-A ~60-second, fully real (no mocks) terminal demo of **enforced network
-egress** — the v0.4.0 headline. It's the fastest way to show a visitor that
-AgentBox *contains* an agent instead of just advising it.
+Two ~60-second, fully real (no mocks) terminal demos. Both *contain* an agent
+instead of just advising it; both build the stub runtime image automatically,
+run in a throwaway temp dir, and clean up after themselves. Each needs `docker`
+running and `agentbox` on your `PATH` (or `AGENTBOX=/path/to/agentbox`).
 
-## The script
+| Demo | Script | GIF | Shows |
+|------|--------|-----|-------|
+| **Blocked exfiltration** (hero) | [`exfil-demo.sh`](exfil-demo.sh) | [`exfil.gif`](exfil.gif) | An agent holds a live API key but can't leak it — attacker host refused, audit record redacts the key. |
+| **Enforced egress** | [`egress-demo.sh`](egress-demo.sh) | [`egress.gif`](egress.gif) | Allowlist one domain; the sandbox reaches it and nothing else; DNS dead; fail closed; audited. |
 
-[`egress-demo.sh`](egress-demo.sh) is self-contained and recordable. It needs
-`docker` running and `agentbox` on your `PATH` (or `AGENTBOX=/path/to/agentbox`);
-it builds the stub runtime image automatically, runs in a throwaway temp dir,
-and cleans up after itself.
+## Blocked exfiltration — `exfil-demo.sh`
+
+The hero story: AgentBox injects a (fake) API key into the sandbox so the agent
+can do real work against ONE allowed API, then proves the key has nowhere to go.
+
+| Beat | Command | Point |
+|------|---------|-------|
+| 1 | `cat agentbox.yaml` | One allowed domain + an injected credential. |
+| 2 | `agentbox exec '… $AGENTBOX_FAKE_API_KEY …'` | The key is really inside the sandbox (value never printed). |
+| 3 | `agentbox exec 'git ls-remote …github.com…'` | ✓ The one allowed API stays reachable. |
+| 4 | `agentbox exec 'git ls-remote …evil.example.com…'` | ✗ Exfil host **refused at the proxy** (403, fail closed). |
+| 5 | `agentbox session show latest \| grep 'BLOCKED egress'` | The attempt is in the **audit trail**. |
+| 6 | dump the key to output → `grep REDACTED …/logs.txt` | The saved record **redacts** the key; the raw value never hits disk. |
+
+The fake key value never appears on screen or in the recording — verify with
+`grep -c 'sk-DEMO-fake-key-not-real' demo/exfil.cast` → `0`.
+
+## Enforced egress — `egress-demo.sh`
+
+[`egress-demo.sh`](egress-demo.sh) is self-contained and recordable.
 
 ### Storyboard (what each beat shows)
 
@@ -23,17 +43,18 @@ and cleans up after itself.
 
 The closing line ties it back: *allowlist your model API, deny the rest.*
 
-### Try it (no recording)
+### Try them (no recording)
 
 ```bash
 agentbox --version >/dev/null   # ensure it's installed and on PATH
-demo/egress-demo.sh
+demo/exfil-demo.sh              # the hero demo
+demo/egress-demo.sh            # the egress-mechanics demo
 ```
 
-Faster, pause-free dry run while iterating:
+Faster, pause-free dry run while iterating (either script):
 
 ```bash
-TYPE=0 HOLD=0 AGENTBOX="$PWD/bin/agentbox" demo/egress-demo.sh
+TYPE=0 HOLD=0 AGENTBOX="$PWD/bin/agentbox" demo/exfil-demo.sh
 ```
 
 ## Record it
@@ -44,19 +65,20 @@ Install the tools (macOS shown; all are also on Linux):
 brew install asciinema agg     # asciinema records; agg turns .cast into .gif
 ```
 
-Record into a `.cast` file (the `-c` runs the demo as the recorded command):
+Record into a `.cast` file with **asciinema 3.x** (the `-c` runs the demo as the
+recorded command; `--headless` records without taking over your terminal):
 
 ```bash
-asciinema rec egress.cast \
-  --idle-time-limit 1.5 \
-  --cols 92 --rows 28 \
-  --overwrite \
-  -c demo/egress-demo.sh
+export AGENTBOX="$PWD/bin/agentbox"   # so the recorded run finds your build
+asciinema rec demo/exfil.cast \
+  --headless --window-size 92x30 --idle-time-limit 1.5 --overwrite \
+  -c demo/exfil-demo.sh
 ```
 
 - `--idle-time-limit 1.5` trims the real proxy-setup pauses so playback stays
   tight even though each sandbox spins up a real container + network.
-- `92×28` fits GitHub's README width without wrapping the command lines.
+- `92×30` fits GitHub's README width without wrapping the command lines (the
+  egress demo uses `92x28`).
 - Use a clean terminal theme (dark, ligature-free) for a crisp result.
 
 ## Turn it into something you can embed
@@ -64,13 +86,13 @@ asciinema rec egress.cast \
 **GIF (simplest for a README):**
 
 ```bash
-agg --theme monokai --font-size 22 egress.cast demo/egress.gif
+agg --theme monokai --font-size 22 demo/exfil.cast demo/exfil.gif
 ```
 
 **SVG (sharper, smaller, selectable text):**
 
 ```bash
-npx svg-term-cli --in egress.cast --out demo/egress.svg --window --width 92 --height 28
+npx svg-term-cli --in demo/exfil.cast --out demo/exfil.svg --window --width 92 --height 30
 ```
 
 **Hosted player (best UX — real copy-pasteable text, no huge binary in the repo):**

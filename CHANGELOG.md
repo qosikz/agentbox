@@ -2,6 +2,22 @@
 
 All notable changes to AgentBox are documented here.
 
+## Unreleased
+
+### Added
+- **Blocked-exfiltration demo** (`demo/exfil-demo.sh` + `demo/exfil.gif`), now
+  the README hero: a sandboxed agent holds a live (fake) API key, reaches its one
+  allowed API, but the attacker host is refused at the egress proxy (fail closed)
+  and the saved audit record redacts the key — all real, no mocks. The fake key
+  never appears on screen or in the recording.
+
+### Changed
+- README first-run story rewritten: the Quickstart now leads with a real
+  sandboxed `agentbox exec` run (non-root, network-deny, diff, audit) against the
+  auto-pulled default image, and a new "Two ways to start" makes explicit that
+  sandbox mechanics are ready with zero setup while a real AI agent is the
+  optional next step (the default `run` agent is a no-op `echo`).
+
 ## v0.4.1 — 2026-06-12 (zero-friction first run + supply-chain trust)
 
 Adoption and trust packaging: a real `agentbox run` now works with no setup, and
