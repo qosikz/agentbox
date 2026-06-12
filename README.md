@@ -127,37 +127,6 @@ allowlist one domain, DNS dead, everything else fails closed, all audited:
 AgentBox does not make an unsafe agent magically safe. It creates guardrails, and
 it is honest about what it does and does not enforce.
 
-## How it works
-
-Every run drops the agent down a one-way funnel: a copy of your repo, a hardened
-container, and a single filtered exit. Everything inside the boundary is created
-per-run and torn down after; the only way out is HTTP(S) to domains you
-allowlisted.
-
-```text
-   Agent harness  (Claude Code · OpenClaw · Hermes · any MCP/skill host)
-        │
-        │   agentbox exec  ·  MCP server  ·  installed skill
-        ▼
-   ┌── policy trust boundary ───────────────────────────────────────────────
-   │
-   │   ① Disposable workspace   copy-on-run; repo never mounted wholesale
-   │            │               (.env, ~/.ssh, ~/.aws, Docker socket excluded)
-   │            ▼
-   │   ② Container runtime      non-root · --cap-drop ALL · no-new-privileges;
-   │            │               only secrets.allow keys injected, redacted in logs
-   │            ▼
-   │   ③ Egress proxy           per-run internal network · DNS sunk · fail closed
-   │            │
-   └────────────┼───────────────────────────────────────────────────────────
-                ▼
-   Allowlisted domains only   e.g. your model API — everything else denied
-```
-
-Local mode (`--runtime local --unsafe`) skips the container and egress proxy: it
-forwards a minimal env and runs on the host, and says so. **Container mode is the
-default and the only mode that enforces the network boundary.**
-
 ## Install
 
 **Prebuilt binaries:**
@@ -238,6 +207,37 @@ agentbox mcp scan ./path-to-mcp-server            # exit 2 if unsafe
   adapter at any agent CLI (local mode), or bake an agent into a runtime image
   for a fully containerized run. See
   [Run an agent fully containerized](#run-an-agent-fully-containerized-baked-in-agents).
+
+## How it works
+
+Every run drops the agent down a one-way funnel: a copy of your repo, a hardened
+container, and a single filtered exit. Everything inside the boundary is created
+per-run and torn down after; the only way out is to domains you allowlisted (on
+ports 80/443 by default).
+
+```text
+   Agent harness  (Claude Code · OpenClaw · Hermes · any MCP/skill host)
+        │
+        │   agentbox exec  ·  MCP server  ·  installed skill
+        ▼
+   ┌── policy trust boundary ───────────────────────────────────────────────
+   │
+   │   ① Disposable workspace   copy-on-run; repo never mounted wholesale
+   │            │               (.env, ~/.ssh, ~/.aws, Docker socket excluded)
+   │            ▼
+   │   ② Container runtime      non-root · --cap-drop ALL · no-new-privileges;
+   │            │               only secrets.allow keys injected, redacted in logs
+   │            ▼
+   │   ③ Egress proxy           per-run internal network · DNS sunk · fail closed
+   │            │
+   └────────────┼───────────────────────────────────────────────────────────
+                ▼
+   Allowlisted domains only   e.g. your model API — everything else denied
+```
+
+Local mode (`--runtime local --unsafe`) skips the container and egress proxy: it
+forwards a minimal env and runs on the host, and says so. **Container mode is the
+default and the only mode that enforces the network boundary.**
 
 ## Commands
 
@@ -390,15 +390,16 @@ gemini mcp add agentbox agentbox mcp serve
 
 ## Recipes
 
-Common jobs, each built from features shown above — no new concepts:
+Step-by-step guides live in [`recipes/`](recipes/) — each built from features
+shown above, no new concepts:
 
-| Goal | How | Pointer |
-|------|-----|---------|
-| **Egress allowlist for model APIs** | `network.mode: allowlist` with your provider's domains (e.g. `api.openai.com`) — the agent reaches its API and nothing else, no `--yes-unsafe`. | [How it works](#how-it-works) · [`examples/agentbox.codex.yaml`](examples/agentbox.codex.yaml) |
-| **Containerized Codex agent** | Bake the CLI into an image; inject the key at runtime from `secrets.allow`. | [Run an agent fully containerized](#run-an-agent-fully-containerized-baked-in-agents) · [`examples/agents/`](examples/agents) |
-| **Safe Claude Code workflow** | `agentbox run "<task>" --agent claude --runtime local --commit` — OAuth login stays local; changes land on a new branch. | [Example: a real agent](#example-a-real-agent-claude-code) |
-| **MCP server quarantine** | `agentbox mcp scan ./server` statically flags dangerous capabilities (exit 2 if unsafe) before you trust a tool. | [Commands](#commands) |
-| **CI dry-run for untrusted PRs** | The composite Action defaults to `--dry-run` and uploads the session as an artifact — review a fork PR's plan without running it. | [GitHub Action](#github-action) · [`examples/github-action-agentbox.yml`](examples/github-action-agentbox.yml) |
+| Recipe | What it does |
+|--------|--------------|
+| [**Safe Claude Code workflow**](recipes/claude-code.md) | Run Claude Code as the agent (local OAuth), land changes on a branch, recorded. |
+| [**Containerized Codex agent**](recipes/codex-container.md) | Bake an agent into an image; inject the key at runtime; egress-allowlisted. |
+| [**MCP server quarantine**](recipes/mcp-quarantine.md) | `agentbox mcp scan` flags dangerous MCP capabilities (exit 2) before you trust a tool. |
+| [**CI dry-run for untrusted PRs**](recipes/github-actions-untrusted-pr.md) | Plan against a fork PR with no execution and no write tokens. |
+| **Egress allowlist for model APIs** | `network.mode: allowlist` + your provider's domains — the agent reaches its API and nothing else. See [How it works](#how-it-works) · [`examples/agentbox.codex.yaml`](examples/agentbox.codex.yaml). |
 
 ## Policy
 

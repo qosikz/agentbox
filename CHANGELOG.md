@@ -2,29 +2,43 @@
 
 All notable changes to AgentBox are documented here.
 
-## Unreleased
+## v0.5.0 — 2026-06-13 (configurable egress ports + adoption polish)
 
 ### Added
-- Project **banner** (`assets/agentbox-banner.png`) leading the README, plus
-  trust **badges** (release, CI, Go version, license, signed-releases, GHCR image).
-- **"How it works"** trust-boundary diagram and a **Recipes** table (egress
-  allowlist, containerized Codex, safe Claude Code, MCP quarantine, CI dry-run).
-- CONTRIBUTING "Common contributions" guides: adding an adapter, writing a
-  security test, and authoring/recording a demo.
-- **Blocked-exfiltration demo** (`demo/exfil-demo.sh` + `demo/exfil.gif`), now
-  the README hero: a sandboxed agent holds a live (fake) API key, reaches its one
+- **Configurable egress ports** (`network.ports`) for allowlist mode. Permit
+  ports beyond the default 80/443 (e.g. an internal metrics endpoint on 8428).
+  Empty/nil keeps the secure default {80,443} — backward compatible. The egress
+  boundary is preserved at any port: still domain-allowlisted, still denies
+  IP-literals and private/reserved/metadata CIDRs (anti-SSRF). Because CONNECT
+  tunnels are protocol-agnostic, permitting a non-80/443 port widens egress to
+  arbitrary TCP toward your allowlisted host:port — README/SECURITY now say so.
+  Ports validated 1–65535 at the config layer and in the proxy. Security-reviewed
+  (verdict: ship). *Originally prototyped by a Hermes agent dogfooding AgentBox.*
+- **Recipe guides** in [`recipes/`](recipes/): safe Claude Code, containerized
+  Codex, MCP server quarantine, CI dry-run for untrusted PRs.
+- Project **banner** + trust **badges** (release, CI, Go version, license,
+  signed-releases, GHCR image), and a **"How it works"** trust-boundary diagram.
+- **Blocked-exfiltration demo** (`demo/exfil-demo.sh` + `demo/exfil.gif`), the
+  README hero: a sandboxed agent holds a live (fake) API key, reaches its one
   allowed API, but the attacker host is refused at the egress proxy (fail closed)
   and the saved audit record redacts the key — all real, no mocks. The fake key
   never appears on screen or in the recording.
+- CONTRIBUTING "Common contributions" guides: adding an adapter, writing a
+  security test, and authoring/recording a demo.
 
 ### Changed
 - README first-run story rewritten: the Quickstart now leads with a real
   sandboxed `agentbox exec` run (non-root, network-deny, diff, audit) against the
-  auto-pulled default image, and a new "Two ways to start" makes explicit that
-  sandbox mechanics are ready with zero setup while a real AI agent is the
-  optional next step (the default `run` agent is a no-op `echo`).
-- Cleaner visual hierarchy: the exfiltration GIF is the single hero; the
-  enforced-egress GIF is now linked from the Network section instead of inlined.
+  auto-pulled default image; a new "Two ways to start" separates ready-now
+  sandbox mechanics from the optional real-agent step. "How it works" moved below
+  Quickstart and the exfiltration GIF is the single hero — leaner top.
+- Honest-limitations updated to reflect that egress is 80/443 by default and that
+  `network.ports` widens it to arbitrary TCP toward allowlisted host:port.
+
+### Removed
+- Internal planning/build/marketing material (`docs/`, `launch/`, `backlog/`,
+  `claude-code/`, `.claude/`) removed from the public repo and purged from
+  history; kept local and gitignored. No credentials were present.
 
 ## v0.4.1 — 2026-06-12 (zero-friction first run + supply-chain trust)
 
