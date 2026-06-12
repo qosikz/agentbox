@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/agentbox-banner.png" alt="AgentBox — Safe workspaces for AI coding agents: secure sandboxing, policy-controlled execution, controlled network egress, secrets protection, auditability & observability" width="100%">
+</p>
+
 # AgentBox
 
 **Safe workspaces for AI coding agents — and a sandbox your agent harness can drive.**

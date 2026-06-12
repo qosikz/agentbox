@@ -5,6 +5,7 @@ All notable changes to AgentBox are documented here.
 ## Unreleased
 
 ### Added
+- Project **banner** (`assets/agentbox-banner.png`) leading the README.
 - **Blocked-exfiltration demo** (`demo/exfil-demo.sh` + `demo/exfil.gif`), now
   the README hero: a sandboxed agent holds a live (fake) API key, reaches its one
   allowed API, but the attacker host is refused at the egress proxy (fail closed)
