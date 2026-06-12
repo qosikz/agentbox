@@ -7,3 +7,10 @@ coverage.out
 
 # Embedded egress-proxy artifacts (built by `make proxy`, embedded at build time)
 internal/netproxy/embedded/netproxy_linux_*
+
+# Internal planning / build / marketing material — kept private, not published.
+/docs/
+/launch/
+/backlog/
+/claude-code/
+/.claude/

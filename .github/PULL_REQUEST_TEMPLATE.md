@@ -10,7 +10,7 @@ Closes #
 
 - [ ] Tests added/updated for the behavior change
 - [ ] `make fmt lint test build` all pass locally
-- [ ] Docs/examples updated (README, `docs/`, `examples/`) if behavior changed
+- [ ] Docs/examples updated (README, `examples/`) if behavior changed
 - [ ] `CHANGELOG.md` updated under `## Unreleased` (for user-facing changes)
 
 ## Security impact

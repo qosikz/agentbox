@@ -56,20 +56,20 @@ make build       # cross-compiles the embedded proxy + the CLI
 | `internal/netproxy` | the filtering forward proxy |
 | `internal/adapters` | per-agent command builders |
 | `internal/{workspace,git,session,secrets,mcpguard,mcpserve,skill}` | supporting subsystems |
-| `examples/`, `docs/`, `demo/` | example policies/images, specs, and the recorded demo |
+| `examples/`, `demo/` | example policies/images and the recorded demos |
 
 ## Standards
 
 - **Tests with every behavior change.** Prefer table-driven, hermetic tests.
   `make test` must never require a running Docker daemon — real-container checks
-  are run manually (see the e2e steps in the docs/PRs).
+  are run manually (see the e2e steps noted in PRs).
 - **Secure by default; never overclaim.** Don't weaken a default, and don't
   claim enforcement the code doesn't deliver — match the honesty of the existing
   docs. Security-relevant code paths must fail **closed**.
 - Small packages, narrow interfaces, actionable errors (what failed, why, how to
   fix), standard library where practical, no unnecessary dependencies.
-- Keep PRs small and focused. Update the README / `docs/` / `examples/` when
-  behavior changes, and add a note under an `## Unreleased` heading in
+- Keep PRs small and focused. Update the README / `examples/` when behavior
+  changes, and add a note under an `## Unreleased` heading in
   `CHANGELOG.md` for user-facing changes.
 
 ## Common contributions

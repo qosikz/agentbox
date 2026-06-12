@@ -14,8 +14,8 @@ import (
 	"github.com/qosikz/agentbox/internal/workspace"
 )
 
-// These tests map to the required security acceptance tests in
-// docs/03_security_model_and_threat_model.md §8.
+// These tests map to AgentBox's required security acceptance criteria —
+// the secure-by-default boundaries summarized in SECURITY.md.
 
 func defaultSpec(t *testing.T, ov policy.Overrides, o runOptions) runtime.RuntimeSpec {
 	t.Helper()

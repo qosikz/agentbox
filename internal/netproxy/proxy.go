@@ -1,7 +1,7 @@
 // Package netproxy implements AgentBox's egress-enforcement proxy: a small
 // filtering forward proxy that is the ONLY path out of the sandbox network.
 //
-// Enforcement model (see docs/03_security_model.md): the agent container is
+// Enforcement model: the agent container is
 // attached to a per-run --internal container network, which has no default
 // route — direct egress is impossible at the network layer, so anything that
 // ignores the proxy fails closed. This proxy runs in a sidecar container that

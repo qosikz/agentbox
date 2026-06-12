@@ -254,8 +254,9 @@ agentbox mcp scan ./path-to-mcp-server            # exit 2 if unsafe
 | `agentbox doctor` | Diagnose local setup |
 | `agentbox version` | Print version |
 
-Most commands support `--json`. Exit codes follow
-[docs/05_cli_ux_specification.md](docs/05_cli_ux_specification.md) §8.
+Most commands support `--json` and use stable exit codes: `0` on success, `2`
+for a policy/unsafe block (e.g. `mcp scan` on a dangerous server), and a non-zero
+failure code otherwise — `run`/`exec` pass the agent's own exit code through.
 
 ### Useful `run` flags
 
@@ -399,9 +400,9 @@ Common jobs, each built from features shown above — no new concepts:
 
 ## Policy
 
-`agentbox init` writes a commented `agentbox.yaml` with secure defaults. See
-[docs/04_policy_specification.md](docs/04_policy_specification.md) and the
-[examples](examples/) (`agentbox.yaml`, `agentbox.strict.yaml`).
+`agentbox init` writes a commented `agentbox.yaml` with secure defaults. See the
+[examples](examples/) (`agentbox.yaml`, `agentbox.strict.yaml`), and run
+`agentbox policy check` to view the effective configuration.
 
 Key rules: deny overrides allow; sensitive paths are always denied unless you
 opt in with an explicit unsafe flag; the network defaults to `deny`; no secrets
@@ -460,9 +461,8 @@ pull requests, keep it dry-run and avoid exposing write tokens.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) and
-[docs/03_security_model_and_threat_model.md](docs/03_security_model_and_threat_model.md).
-The security acceptance tests (§8) live in `internal/cli/security_test.go`.
+See [SECURITY.md](SECURITY.md). The security acceptance tests live in
+`internal/cli/security_test.go`.
 
 ## Verifying releases
 

@@ -30,9 +30,7 @@ disclosure with you.
 ## Scope — what's enforced vs. what isn't
 
 AgentBox reduces risk; it does not make an unsafe agent safe. The enforced
-boundaries **and the honest limitations** are documented in
-[docs/03_security_model_and_threat_model.md](docs/03_security_model_and_threat_model.md).
-In short:
+boundaries **and the honest limitations** are, in short:
 
 - **Secrets** — the host environment is not forwarded; only allowlisted names
   reach the sandbox; values are redacted from logs, diffs, and sessions.
