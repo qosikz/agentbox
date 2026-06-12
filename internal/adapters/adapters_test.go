@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qosikz/agentbox/internal/config"
+	"github.com/qosikz/andbo/internal/config"
 )
 
 func TestCustomAdapterName(t *testing.T) {

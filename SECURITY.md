@@ -1,11 +1,11 @@
 # Security Policy
 
-AgentBox is a security tool, so we take reports seriously — and we try to be
+Andbo is a security tool, so we take reports seriously — and we try to be
 honest about what it does and does not enforce.
 
 ## Supported versions
 
-The latest `v0.x` release and `main` receive security fixes. AgentBox is
+The latest `v0.x` release and `main` receive security fixes. Andbo is
 pre-1.0; defaults and APIs may still change.
 
 ## Reporting a vulnerability
@@ -13,14 +13,14 @@ pre-1.0; defaults and APIs may still change.
 **Please report privately — do not open a public issue.**
 
 Use GitHub's private vulnerability reporting:
-**[→ Report a vulnerability](https://github.com/qosikz/agentbox/security/advisories/new)**
+**[→ Report a vulnerability](https://github.com/qosikz/andbo/security/advisories/new)**
 (the repository's **Security** tab → **Report a vulnerability**). This keeps the
 report confidential while we work on a fix.
 
 Please include:
 
 - A description and the impact (what an attacker gains).
-- Reproduction steps and the affected version/commit (`agentbox version`).
+- Reproduction steps and the affected version/commit (`andbo version`).
 - Your environment (OS, container engine + version).
 - A suggested mitigation, if you have one.
 
@@ -29,7 +29,7 @@ disclosure with you.
 
 ## Scope — what's enforced vs. what isn't
 
-AgentBox reduces risk; it does not make an unsafe agent safe. The enforced
+Andbo reduces risk; it does not make an unsafe agent safe. The enforced
 boundaries **and the honest limitations** are, in short:
 
 - **Secrets** — the host environment is not forwarded; only allowlisted names

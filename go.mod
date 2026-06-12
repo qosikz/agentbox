@@ -1,4 +1,4 @@
-module github.com/qosikz/agentbox
+module github.com/qosikz/andbo
 
 go 1.23
 

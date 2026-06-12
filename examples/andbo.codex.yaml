@@ -1,13 +1,13 @@
-# AgentBox policy — run the OpenAI Codex CLI as a baked-in, sandboxed agent.
+# Andbo policy — run the OpenAI Codex CLI as a baked-in, sandboxed agent.
 #
 # ILLUSTRATIVE template, not a verified turnkey run: Codex's auth and its own
 # sandbox behavior are provider-specific and version-dependent. The VERIFIED
-# zero-cost path is the stub (examples/agentbox.stub.yaml). Treat this as a
+# zero-cost path is the stub (examples/andbo.stub.yaml). Treat this as a
 # starting point and consult the Codex docs for your version.
 #
-#   docker build -t agentbox/codex:latest -f examples/agents/codex.Dockerfile examples/agents
+#   docker build -t andbo/codex:latest -f examples/agents/codex.Dockerfile examples/agents
 #   export CODEX_API_KEY=sk-...            # see note below
-#   agentbox run "add a test for parseConfig" --policy examples/agentbox.codex.yaml
+#   andbo run "add a test for parseConfig" --policy examples/andbo.codex.yaml
 #
 # No unsafe flag needed: network.mode=allowlist is ENFORCED (per-run isolated
 # network + egress proxy), so the agent can reach its model API and nothing
@@ -16,7 +16,7 @@
 runtime:
   isolation: container
   engine: docker
-  image: agentbox/codex:latest          # the codex CLI is baked into this image
+  image: andbo/codex:latest          # the codex CLI is baked into this image
   cleanup: true
 
 agent:
@@ -44,7 +44,7 @@ secrets:
 
 # Two gotchas you may hit with the default `agent.default: codex` path:
 #   1. Codex ships its own Landlock/Seatbelt sandbox, which can CONFLICT with
-#      AgentBox's container. Inside AgentBox the container IS the boundary, so
+#      Andbo's container. Inside Andbo the container IS the boundary, so
 #      you may need to bypass Codex's sandbox (see the custom block below).
 #   2. If your Codex version prefers ChatGPT login over the API key, you may
 #      need `--config preferred_auth_method=apikey`.

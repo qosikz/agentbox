@@ -4,13 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qosikz/agentbox/internal/config"
+	"github.com/qosikz/andbo/internal/config"
 )
 
 func TestMandatoryDeniesAlwaysPresent(t *testing.T) {
 	cfg := config.DefaultPolicy()
 	cfg.Filesystem.Deny = []string{"foo"} // user wiped the sensitive defaults
-	ep := BuildEffectivePolicy(cfg, "agentbox.yaml", Overrides{})
+	ep := BuildEffectivePolicy(cfg, "andbo.yaml", Overrides{})
 	for _, want := range []string{".env", "~/.ssh", "~/.aws", "~/.kube", "~/.config/gh"} {
 		if !containsStr(ep.Filesystem.Deny, want) {
 			t.Errorf("mandatory deny %q missing from %v", want, ep.Filesystem.Deny)

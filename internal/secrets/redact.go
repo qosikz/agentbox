@@ -1,4 +1,4 @@
-// Package secrets redacts sensitive values from text that AgentBox persists
+// Package secrets redacts sensitive values from text that Andbo persists
 // (logs, reports, session metadata). Redaction is a defense-in-depth control:
 // it cannot guarantee every secret format is caught, so the security model
 // treats it as best-effort and documents that limitation.

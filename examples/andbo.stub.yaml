@@ -1,11 +1,11 @@
-# AgentBox policy — stub-agent proof (zero cost, no real key, no network).
+# Andbo policy — stub-agent proof (zero cost, no real key, no network).
 #
 # Proves the harness -> sandbox -> agent path with a baked-in agent and a
 # policy-injected (dummy) API key that gets redacted from the session. Run:
 #
-#   docker build -t agentbox/stub-agent:latest -f examples/agents/stub.Dockerfile examples/agents
-#   AGENTBOX_FAKE_API_KEY=dummy-not-a-real-key-0xCAFE \
-#     agentbox run "prove the path" --policy examples/agentbox.stub.yaml
+#   docker build -t andbo/stub-agent:latest -f examples/agents/stub.Dockerfile examples/agents
+#   ANDBO_FAKE_API_KEY=dummy-not-a-real-key-0xCAFE \
+#     andbo run "prove the path" --policy examples/andbo.stub.yaml
 #
 # Note: no --yes-unsafe is needed — this stays in safe container mode with
 # network denied. The stub agent needs no network.
@@ -13,13 +13,13 @@
 runtime:
   isolation: container
   engine: docker
-  image: agentbox/stub-agent:latest    # built from examples/agents/stub.Dockerfile
+  image: andbo/stub-agent:latest    # built from examples/agents/stub.Dockerfile
   cleanup: true
 
 agent:
   default: custom
   custom:
-    command: agentbox-stub-agent       # baked into the image, NOT on the host PATH
+    command: andbo-stub-agent       # baked into the image, NOT on the host PATH
     args:
       - "{{ task }}"
 
@@ -29,9 +29,9 @@ network:
 secrets:
   mode: explicit
   # The dummy key is read from the host env and injected into the container so
-  # the agent can authenticate. AgentBox redacts its value from the session.
+  # the agent can authenticate. Andbo redacts its value from the session.
   allow:
-    - AGENTBOX_FAKE_API_KEY
+    - ANDBO_FAKE_API_KEY
   # deny is omitted, so the secure default deny (OPENAI_API_KEY, ...) still applies.
 
 tests:

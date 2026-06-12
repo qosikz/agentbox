@@ -1,4 +1,4 @@
-// Package netproxy implements AgentBox's egress-enforcement proxy: a small
+// Package netproxy implements Andbo's egress-enforcement proxy: a small
 // filtering forward proxy that is the ONLY path out of the sandbox network.
 //
 // Enforcement model: the agent container is
@@ -34,7 +34,7 @@ import (
 // AuditPrefix starts every audit line the proxy writes to its log. The runner
 // scans container logs for this prefix to turn denials into session policy
 // events, so it must stay stable.
-const AuditPrefix = "AGENTBOX-EGRESS"
+const AuditPrefix = "ANDBO-EGRESS"
 
 const (
 	// tunnelIdle bounds an idle CONNECT tunnel so a half-open/slowloris client
@@ -373,7 +373,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 // and the response body so both the session and the failing tool explain why.
 func (p *Proxy) deny(w http.ResponseWriter, r *http.Request, target, reason string) {
 	p.cfg.Logf("%s DENY %s %s: %s", AuditPrefix, strings.ToLower(r.Method), target, reason)
-	http.Error(w, fmt.Sprintf("agentbox egress proxy: %s %s denied: %s", r.Method, target, reason), http.StatusForbidden)
+	http.Error(w, fmt.Sprintf("andbo egress proxy: %s %s denied: %s", r.Method, target, reason), http.StatusForbidden)
 }
 
 // hostOnly trims a port from host:port if present.

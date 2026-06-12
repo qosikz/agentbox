@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/qosikz/agentbox/internal/config"
-	"github.com/qosikz/agentbox/internal/git"
-	"github.com/qosikz/agentbox/internal/policy"
-	"github.com/qosikz/agentbox/internal/runtime"
-	"github.com/qosikz/agentbox/internal/session"
-	"github.com/qosikz/agentbox/internal/workspace"
+	"github.com/qosikz/andbo/internal/config"
+	"github.com/qosikz/andbo/internal/git"
+	"github.com/qosikz/andbo/internal/policy"
+	"github.com/qosikz/andbo/internal/runtime"
+	"github.com/qosikz/andbo/internal/session"
+	"github.com/qosikz/andbo/internal/workspace"
 )
 
 // cmdExec runs an arbitrary command inside an isolated, policy-controlled
@@ -23,7 +23,7 @@ import (
 //
 // Exit-code contract (harness ergonomics): on infrastructure success the
 // sandboxed command's own exit code is passed through, so callers can gate on
-// it directly. AgentBox's own failures keep the standard coded exits
+// it directly. Andbo's own failures keep the standard coded exits
 // (invalid config 7, runtime unavailable 3, unsafe required 8, ...).
 func (r *Root) cmdExec(ctx context.Context, args []string) error {
 	o, command, err := parseExecArgs(args)
@@ -31,10 +31,10 @@ func (r *Root) cmdExec(ctx context.Context, args []string) error {
 		return coded(ExitGeneral, err)
 	}
 	if len(command) == 0 {
-		return codedf(ExitGeneral, "missing command.\nExamples:\n  agentbox exec \"go test ./...\"\n  agentbox exec -- python -m pytest tests/")
+		return codedf(ExitGeneral, "missing command.\nExamples:\n  andbo exec \"go test ./...\"\n  andbo exec -- python -m pytest tests/")
 	}
 	if o.commit || o.openPR {
-		return codedf(ExitGeneral, "exec does not support --commit/--open-pr; use 'agentbox run' for agent workflows that commit")
+		return codedf(ExitGeneral, "exec does not support --commit/--open-pr; use 'andbo run' for agent workflows that commit")
 	}
 
 	base, err := os.Getwd()
@@ -51,7 +51,7 @@ func (r *Root) cmdExec(ctx context.Context, args []string) error {
 		for _, e := range chk.Errors {
 			warn(e)
 		}
-		return codedf(ExitInvalidConfig, "policy %s is invalid; run 'agentbox policy check'", o.policy)
+		return codedf(ExitInvalidConfig, "policy %s is invalid; run 'andbo policy check'", o.policy)
 	}
 	if o.engine != "" && o.engine != "docker" && o.engine != "podman" {
 		return codedf(ExitInvalidConfig, "--engine %q is invalid (expected: docker, podman)", o.engine)
@@ -92,7 +92,7 @@ func (r *Root) cmdExec(ctx context.Context, args []string) error {
 	rec.Event(session.EvPolicyLoaded)
 	red := buildRedactor(ep)
 
-	workDir := filepath.Join(base, ".agentbox", "work", rec.Session.ID)
+	workDir := filepath.Join(base, ".andbo", "work", rec.Session.ID)
 	keep := false
 	if !o.dryRun && ep.Runtime.Cleanup {
 		defer func() {
@@ -286,7 +286,7 @@ func parseExecArgs(args []string) (runOptions, []string, error) {
 func printExecSummary(rec *session.Recorder, ep policy.EffectivePolicy, o runOptions, res runtime.RunResult, dir string) {
 	s := rec.Session
 	w := os.Stdout
-	fmt.Fprintf(w, "AgentBox exec\n\n")
+	fmt.Fprintf(w, "Andbo exec\n\n")
 	fmt.Fprintf(w, "Command: %s\n", s.Task)
 	runtimeLine := s.Runtime.Engine
 	if o.dryRun {

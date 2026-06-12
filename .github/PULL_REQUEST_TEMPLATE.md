@@ -1,4 +1,4 @@
-<!-- Thanks for contributing to AgentBox! Keep PRs small and focused. -->
+<!-- Thanks for contributing to Andbo! Keep PRs small and focused. -->
 
 ## What & why
 

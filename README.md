@@ -1,31 +1,31 @@
 <p align="center">
-  <img src="assets/agentbox-banner.png" alt="AgentBox — Safe workspaces for AI coding agents: secure sandboxing, policy-controlled execution, controlled network egress, secrets protection, auditability & observability" width="100%">
+  <img src="assets/andbo-banner.png" alt="Andbo — Disposable sandboxes for AI coding agents: secure sandboxing, policy-controlled execution, controlled network egress, secrets protection, auditability & observability" width="100%">
 </p>
 
-# AgentBox
+# Andbo
 
 <p align="center">
-  <a href="https://github.com/qosikz/agentbox/releases/latest"><img src="https://img.shields.io/github/v/release/qosikz/agentbox?sort=semver&color=3b82f6" alt="Latest release"></a>
-  <a href="https://github.com/qosikz/agentbox/actions/workflows/ci.yml"><img src="https://github.com/qosikz/agentbox/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/qosikz/agentbox?logo=go&logoColor=white" alt="Go version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/qosikz/agentbox?color=blue" alt="License: Apache-2.0"></a>
+  <a href="https://github.com/qosikz/andbo/releases/latest"><img src="https://img.shields.io/github/v/release/qosikz/andbo?sort=semver&color=3b82f6" alt="Latest release"></a>
+  <a href="https://github.com/qosikz/andbo/actions/workflows/ci.yml"><img src="https://github.com/qosikz/andbo/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/qosikz/andbo?logo=go&logoColor=white" alt="Go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/qosikz/andbo?color=blue" alt="License: Apache-2.0"></a>
   <a href="#verifying-releases"><img src="https://img.shields.io/badge/releases-signed%20%2B%20SBOM%20%2B%20provenance-3b82f6" alt="Signed releases with SBOM and SLSA provenance"></a>
-  <a href="https://github.com/qosikz/agentbox/pkgs/container/agentbox%2Fruntime"><img src="https://img.shields.io/badge/ghcr.io-agentbox%2Fruntime-2496ED?logo=docker&logoColor=white" alt="GHCR runtime image"></a>
+  <a href="https://github.com/qosikz/andbo/pkgs/container/andbo%2Fruntime"><img src="https://img.shields.io/badge/ghcr.io-andbo%2Fruntime-2496ED?logo=docker&logoColor=white" alt="GHCR runtime image"></a>
 </p>
 
-**Safe workspaces for AI coding agents — and a sandbox your agent harness can drive.**
+**Disposable sandboxes for AI coding agents — and one your agent harness can drive.**
 
-AgentBox runs AI coding agents (Claude Code, Codex, Gemini, Goose, OpenCode, or
+Andbo runs AI coding agents (Claude Code, Codex, Gemini, Goose, OpenCode, or
 **any custom shell agent**) in isolated, reproducible, policy-controlled
 workspaces — so an agent can edit a real repository without uncontrolled access
 to your secrets, network, host filesystem, or MCP tools. Every run leaves an
 auditable session record.
 
-It works in **both directions**: point AgentBox at an agent, **or** let an agent
-harness — Claude Code, [OpenClaw](#use-agentbox-from-your-agent-harness-integration),
-Hermes Agent, or any MCP/skill-capable harness — call AgentBox as its *safety
+It works in **both directions**: point Andbo at an agent, **or** let an agent
+harness — Claude Code, [OpenClaw](#use-andbo-from-your-agent-harness-integration),
+Hermes Agent, or any MCP/skill-capable harness — call Andbo as its *safety
 sandbox* to test risky commands, validate generated code, and vet new tools or
-subagents before trusting them. Via `agentbox exec`, an MCP server, or a
+subagents before trusting them. Via `andbo exec`, an MCP server, or a
 cross-harness skill.
 
 <p align="center">
@@ -35,17 +35,17 @@ cross-harness skill.
 > _A sandboxed agent holds a **live API key** — and has nowhere to leak it. Your one allowed API stays reachable; the attacker host is refused at the proxy (fail closed); and even when the agent dumps the key into its output, the audit record **redacts** it. ~60s, all real. ([how it's recorded](demo/))_
 
 ```bash
-agentbox run "fix failing tests"
+andbo run "fix failing tests"
 ```
 
 ```text
-AgentBox session started
+Andbo session started
 
 Repository: .
 Agent: custom
 Runtime: docker
 Network: deny
-Policy: agentbox.yaml
+Policy: andbo.yaml
 
 ✓ Workspace created
 ✓ Policy applied
@@ -60,19 +60,19 @@ Policy: agentbox.yaml
 > egress** (allowlist), harness integration (`exec` / `mcp serve` / `skill`),
 > and baked-in containerized agents are supported. A signed default runtime
 > image is published and pulled automatically, so the **sandbox runs out of the
-> box** — `agentbox exec` proves isolation, network-deny, recording, and
+> box** — `andbo exec` proves isolation, network-deny, recording, and
 > diff/audit with no setup; add a real agent when you want it to make edits (see
 > [Two ways to start](#two-ways-to-start) and
 > [Verifying releases](#verifying-releases)).
 
-## Add AgentBox to your agent harness
+## Add Andbo to your agent harness
 
-Give your agent a sandbox in ~30 seconds. [Install AgentBox](#install), then
+Give your agent a sandbox in ~30 seconds. [Install Andbo](#install), then
 drop the skill into the harness you use — it teaches the agent *when* to
-sandbox and *how* to call AgentBox:
+sandbox and *how* to call Andbo:
 
 ```bash
-agentbox skill install --target claude-project
+andbo skill install --target claude-project
 # targets: claude-project | claude-user | openclaw | hermes | agents
 ```
 
@@ -81,27 +81,27 @@ anything risky in an isolated container instead of on your host, and read the
 exit code, diff, and output back:
 
 ```bash
-agentbox exec "npm install && npm test"   # host untouched; recorded as a session
+andbo exec "npm install && npm test"   # host untouched; recorded as a session
 ```
 
-Prefer structured tools over shell calls? Expose AgentBox over MCP instead:
+Prefer structured tools over shell calls? Expose Andbo over MCP instead:
 
 ```bash
-claude mcp add agentbox -- agentbox mcp serve   # also: openclaw · codex · gemini
+claude mcp add andbo -- andbo mcp serve   # also: openclaw · codex · gemini
 ```
 
 Works with Claude Code, **OpenClaw** (`~/.openclaw/workspace/skills`), **Hermes
 Agent** (`~/.hermes/skills`), and any agentskills.io-compatible harness
 (`~/.agents/skills`). Unsafe modes are never reachable through the skill or the
-MCP server, so a harness can't escalate past your `agentbox.yaml`.
-→ [Full guide](#use-agentbox-from-your-agent-harness-integration).
+MCP server, so a harness can't escalate past your `andbo.yaml`.
+→ [Full guide](#use-andbo-from-your-agent-harness-integration).
 
 ## Why
 
 AI coding agents can read code, run commands, install dependencies, open PRs, and
 call MCP tools. Run directly on your machine, they can leak `.env` files, SSH
 keys, and cloud credentials, reach any network endpoint, and run destructive
-commands. AgentBox puts deterministic guardrails around them:
+commands. Andbo puts deterministic guardrails around them:
 
 - **Secrets** — the host environment (including `PATH` and `HOME`) is never
   forwarded; containers get a standard `PATH`, `HOME` set to the workspace,
@@ -118,13 +118,13 @@ commands. AgentBox puts deterministic guardrails around them:
   `--security-opt no-new-privileges`; never privileged, never the Docker socket.
   Works with Docker or Podman.
 - **MCP** — a static scanner flags dangerous MCP server capabilities before you trust them.
-- **Audit** — every run is recorded under `.agentbox/sessions/<id>/`.
+- **Audit** — every run is recorded under `.andbo/sessions/<id>/`.
 
 A second ~60s demo covers the enforced-egress mechanics on their own — allowlist
 one domain, DNS dead, everything else fails closed, all audited. It's recordable
 from [`demo/egress-demo.sh`](demo/egress-demo.sh) ([all demos](demo/)).
 
-AgentBox does not make an unsafe agent magically safe. It creates guardrails, and
+Andbo does not make an unsafe agent magically safe. It creates guardrails, and
 it is honest about what it does and does not enforce.
 
 ## Install
@@ -132,23 +132,23 @@ it is honest about what it does and does not enforce.
 **Prebuilt binaries:**
 
 Download the binary for your platform from
-[GitHub Releases](https://github.com/qosikz/agentbox/releases) (published for
+[GitHub Releases](https://github.com/qosikz/andbo/releases) (published for
 every `v*` tag; `checksums.txt` carries SHA-256 sums), make it executable, and
 put it on your `PATH`.
 
 **From source:**
 
 ```bash
-git clone https://github.com/qosikz/agentbox.git
-cd agentbox
-make build        # produces ./bin/agentbox with embedded version/commit/date
-./bin/agentbox version
+git clone https://github.com/qosikz/andbo.git
+cd andbo
+make build        # produces ./bin/andbo with embedded version/commit/date
+./bin/andbo version
 ```
 
 **With `go install`:**
 
 ```bash
-go install github.com/qosikz/agentbox/cmd/agentbox@latest
+go install github.com/qosikz/andbo/cmd/andbo@latest
 ```
 
 Building from source requires Go 1.23+. Docker or Podman is optional and only
@@ -156,18 +156,18 @@ needed for real (non-dry-run) container execution.
 
 ## Quickstart
 
-From inside your project (a git repo — that's how AgentBox captures the diff):
+From inside your project (a git repo — that's how Andbo captures the diff):
 
 ```bash
 # 1. Create a policy and session directory
-agentbox init
+andbo init
 
 # 2. Prove the sandbox for real — runs in an isolated container. The default
 #    image is pulled automatically; no API key, nothing to build, host untouched.
-agentbox exec "whoami && uname -m && echo sandboxed > proof.txt"
+andbo exec "whoami && uname -m && echo sandboxed > proof.txt"
 
 # 3. See exactly what happened
-agentbox session show latest
+andbo session show latest
 ```
 
 That first run is the whole pitch in ten seconds. `session show` reports:
@@ -188,20 +188,20 @@ audit log** — with zero setup.
 
 ```bash
 # 4. Validate/inspect policy, plan an agent run, scan an MCP server
-agentbox policy check
-agentbox run "fix failing tests" --dry-run        # plan only; no Docker needed
-agentbox mcp scan ./path-to-mcp-server            # exit 2 if unsafe
+andbo policy check
+andbo run "fix failing tests" --dry-run        # plan only; no Docker needed
+andbo mcp scan ./path-to-mcp-server            # exit 2 if unsafe
 ```
 
-`agentbox doctor` checks your local setup (Docker, git, gh, known agents).
+`andbo doctor` checks your local setup (Docker, git, gh, known agents).
 
 ### Two ways to start
 
 - **Sandbox mechanics — ready now, zero setup.** The default runtime image and
-  `agentbox exec` prove the core: container isolation, non-root execution,
+  `andbo exec` prove the core: container isolation, non-root execution,
   network-deny, session recording, secret redaction, and a diff/audit of every
   change. No API key, no image to build. *(The default `run` agent is a no-op
-  `echo`, so a bare `agentbox run` exercises the full pipeline but makes no
+  `echo`, so a bare `andbo run` exercises the full pipeline but makes no
   edits — that's intentional: the first run is safe and free.)*
 - **A real AI agent making the edits — optional next step.** Point the `custom`
   adapter at any agent CLI (local mode), or bake an agent into a runtime image
@@ -218,7 +218,7 @@ ports 80/443 by default).
 ```text
    Agent harness  (Claude Code · OpenClaw · Hermes · any MCP/skill host)
         │
-        │   agentbox exec  ·  MCP server  ·  installed skill
+        │   andbo exec  ·  MCP server  ·  installed skill
         ▼
    ┌── policy trust boundary ───────────────────────────────────────────────
    │
@@ -243,16 +243,16 @@ default and the only mode that enforces the network boundary.**
 
 | Command | Description |
 |---|---|
-| `agentbox init` | Create `agentbox.yaml` and `.agentbox/` |
-| `agentbox run "<task>"` | Run an agent in an isolated, policy-controlled workspace |
-| `agentbox exec "<command>"` | Run a command in an isolated workspace (exit code passes through) |
-| `agentbox policy check [--json]` | Validate policy; show effective config, unsafe options, honest limitations |
-| `agentbox mcp scan <path> [--json]` | Statically scan an MCP server (exit 2 if unsafe) |
-| `agentbox mcp serve` | Serve sandbox tools over MCP (stdio) to agent harnesses |
-| `agentbox skill install` | Install the AgentBox skill into a harness (Claude Code, OpenClaw, Hermes, …) |
-| `agentbox session list / show [id] / replay [id]` | Inspect recorded sessions |
-| `agentbox doctor` | Diagnose local setup |
-| `agentbox version` | Print version |
+| `andbo init` | Create `andbo.yaml` and `.andbo/` |
+| `andbo run "<task>"` | Run an agent in an isolated, policy-controlled workspace |
+| `andbo exec "<command>"` | Run a command in an isolated workspace (exit code passes through) |
+| `andbo policy check [--json]` | Validate policy; show effective config, unsafe options, honest limitations |
+| `andbo mcp scan <path> [--json]` | Statically scan an MCP server (exit 2 if unsafe) |
+| `andbo mcp serve` | Serve sandbox tools over MCP (stdio) to agent harnesses |
+| `andbo skill install` | Install the Andbo skill into a harness (Claude Code, OpenClaw, Hermes, …) |
+| `andbo session list / show [id] / replay [id]` | Inspect recorded sessions |
+| `andbo doctor` | Diagnose local setup |
+| `andbo version` | Print version |
 
 Most commands support `--json` and use stable exit codes: `0` on success, `2`
 for a policy/unsafe block (e.g. `mcp scan` on a dangerous server), and a non-zero
@@ -263,7 +263,7 @@ failure code otherwise — `run`/`exec` pass the agent's own exit code through.
 ```text
 --dry-run                 Plan only; do not execute the agent (no Docker required)
 --agent <name>            custom | claude | codex | gemini | goose | opencode
---policy <file>           Policy file (default: agentbox.yaml)
+--policy <file>           Policy file (default: andbo.yaml)
 --network deny|allowlist|open
 --engine docker|podman    Container engine (default: policy runtime.engine)
 --write <path>            Add a writable path (repeatable)
@@ -276,13 +276,13 @@ failure code otherwise — `run`/`exec` pass the agent's own exit code through.
 ### Example: a real agent (Claude Code)
 
 ```bash
-agentbox run "fix the failing test" --agent claude --runtime local --yes-unsafe --commit
+andbo run "fix the failing test" --agent claude --runtime local --yes-unsafe --commit
 ```
 
 Built-in adapters: `custom`, `claude`, `codex`, `gemini`, `goose`, `opencode`.
 The `custom` adapter runs **any** CLI agent — point `agent.custom.command` at
-your binary and AgentBox substitutes the task into `{{ task }}`, so you are
-never limited to the built-ins. AgentBox runs the agent in a disposable
+your binary and Andbo substitutes the task into `{{ task }}`, so you are
+never limited to the built-ins. Andbo runs the agent in a disposable
 workspace copy, re-runs your test commands, captures the diff, and (with
 `--commit`) propagates the branch back into your repository. Local mode
 forwards only `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL`, `TERM`, and
@@ -297,26 +297,26 @@ already proves the sandbox mechanics (see [Two ways to start](#two-ways-to-start
 bake an agent in only when you want an AI to make the edits *inside* the
 container.
 
-To do that, **bake its CLI into a runtime image** and let AgentBox run it under
+To do that, **bake its CLI into a runtime image** and let Andbo run it under
 policy. The agent binary lives in the image, not
-on your host — AgentBox preflights it by probing the image, so a baked-in agent
+on your host — Andbo preflights it by probing the image, so a baked-in agent
 you have never installed locally still runs.
 
 ```bash
 # Build an image with the agent CLI baked in (examples in examples/agents/):
-docker build -t agentbox/codex:latest -f examples/agents/codex.Dockerfile examples/agents
+docker build -t andbo/codex:latest -f examples/agents/codex.Dockerfile examples/agents
 
 # Inject the key at runtime (NEVER baked into the image) and run.
 # (Illustrative — Codex auth/sandbox specifics are version-dependent; the stub
 # below is the verified path. `codex exec` reads CODEX_API_KEY.)
 export CODEX_API_KEY=sk-...
-agentbox run "add a test for parseConfig" --policy examples/agentbox.codex.yaml
+andbo run "add a test for parseConfig" --policy examples/andbo.codex.yaml
 # (no unsafe flag: the enforced allowlist covers api.openai.com only)
 ```
 
 - **The API key is never in the image.** Image layers are immutable and would
   leak a baked-in secret via `docker history` / `docker save` / a registry push.
-  AgentBox reads the key from your host env, injects it into the container only
+  Andbo reads the key from your host env, injects it into the container only
   when `secrets.allow` lists it (and `secrets.deny` does not), and redacts its
   value from logs, diffs, and session metadata.
 - **Network:** a real agent reaches its model API through the **enforced
@@ -327,28 +327,28 @@ agentbox run "add a test for parseConfig" --policy examples/agentbox.codex.yaml
   like SSH cannot exit (fail closed) — though you can widen this with
   `network.ports` (which permits arbitrary TCP to your allowlisted host:port);
   local (`--runtime local`) runs have no network enforcement; enforcement needs
-  the egress proxy embedded in released binaries (`agentbox doctor` shows
+  the egress proxy embedded in released binaries (`andbo doctor` shows
   `egress-proxy`).
 
 Prove the whole path for free with the bundled **stub agent** — no key, no
 network, no spend:
 
 ```bash
-docker build -t agentbox/stub-agent:latest -f examples/agents/stub.Dockerfile examples/agents
-AGENTBOX_FAKE_API_KEY=dummy-not-a-real-key \
-  agentbox run "prove the path" --policy examples/agentbox.stub.yaml
+docker build -t andbo/stub-agent:latest -f examples/agents/stub.Dockerfile examples/agents
+ANDBO_FAKE_API_KEY=dummy-not-a-real-key \
+  andbo run "prove the path" --policy examples/andbo.stub.yaml
 ```
 
 The stub confirms the injected key reached the container and writes a file; the
-saved session shows the dummy key only as `[REDACTED:AGENTBOX_FAKE_API_KEY]`.
+saved session shows the dummy key only as `[REDACTED:ANDBO_FAKE_API_KEY]`.
 See [examples/agents/README.md](examples/agents/README.md) for the full guide.
 
-## Use AgentBox FROM your agent (harness integration)
+## Use Andbo FROM your agent (harness integration)
 
-This is where AgentBox shines. An agent harness on your machine — **Claude
+This is where Andbo shines. An agent harness on your machine — **Claude
 Code, OpenClaw, Hermes Agent**, Codex CLI, Gemini CLI, Goose, OpenCode, or
-anything that speaks MCP or reads markdown skills — can call AgentBox as its
-**safety sandbox**. The harness *is* the agent; AgentBox is the blast shield
+anything that speaks MCP or reads markdown skills — can call Andbo as its
+**safety sandbox**. The harness *is* the agent; Andbo is the blast shield
 around whatever it wants to try:
 
 - **Test a new subagent or tool** before trusting it in the real workspace.
@@ -358,34 +358,34 @@ around whatever it wants to try:
 
 Every experiment is isolated, policy-controlled, secret-redacted, and recorded
 as an auditable session. Unsafe modes are **not** reachable through these
-surfaces, so a harness can never escalate past your `agentbox.yaml`. Three ways
+surfaces, so a harness can never escalate past your `andbo.yaml`. Three ways
 to wire it in:
 
-**1. The sandbox primitive** — `agentbox exec` runs any command in an isolated
+**1. The sandbox primitive** — `andbo exec` runs any command in an isolated
 workspace and passes the command's exit code through:
 
 ```bash
-agentbox exec "go test ./..." --json     # exit_code, stdout, changed_files, session_dir
-agentbox exec --dry-run "rm -rf build"   # preview the sandbox without executing
+andbo exec "go test ./..." --json     # exit_code, stdout, changed_files, session_dir
+andbo exec --dry-run "rm -rf build"   # preview the sandbox without executing
 ```
 
 **2. The skill** — teach your harness when to reach for the sandbox:
 
 ```bash
-agentbox skill install --target claude-project   # ./.claude/skills/ (this repo)
-agentbox skill install --target openclaw         # ~/.openclaw/workspace/skills/
-agentbox skill install --target hermes           # ~/.hermes/skills/
-agentbox skill install --target agents           # ~/.agents/skills/ (cross-agent standard)
+andbo skill install --target claude-project   # ./.claude/skills/ (this repo)
+andbo skill install --target openclaw         # ~/.openclaw/workspace/skills/
+andbo skill install --target hermes           # ~/.hermes/skills/
+andbo skill install --target agents           # ~/.agents/skills/ (cross-agent standard)
 ```
 
 **3. The MCP server** — structured tools (`sandbox_exec`, `sandbox_run`,
 `scan_mcp`, `session_list`, `session_show`) for any MCP-capable harness:
 
 ```bash
-claude mcp add agentbox -- agentbox mcp serve
-openclaw mcp add agentbox --command agentbox --arg mcp --arg serve
-codex mcp add agentbox -- agentbox mcp serve
-gemini mcp add agentbox agentbox mcp serve
+claude mcp add andbo -- andbo mcp serve
+openclaw mcp add andbo --command andbo --arg mcp --arg serve
+codex mcp add andbo -- andbo mcp serve
+gemini mcp add andbo andbo mcp serve
 ```
 
 ## Recipes
@@ -397,15 +397,15 @@ shown above, no new concepts:
 |--------|--------------|
 | [**Safe Claude Code workflow**](recipes/claude-code.md) | Run Claude Code as the agent (local OAuth), land changes on a branch, recorded. |
 | [**Containerized Codex agent**](recipes/codex-container.md) | Bake an agent into an image; inject the key at runtime; egress-allowlisted. |
-| [**MCP server quarantine**](recipes/mcp-quarantine.md) | `agentbox mcp scan` flags dangerous MCP capabilities (exit 2) before you trust a tool. |
+| [**MCP server quarantine**](recipes/mcp-quarantine.md) | `andbo mcp scan` flags dangerous MCP capabilities (exit 2) before you trust a tool. |
 | [**CI dry-run for untrusted PRs**](recipes/github-actions-untrusted-pr.md) | Plan against a fork PR with no execution and no write tokens. |
-| **Egress allowlist for model APIs** | `network.mode: allowlist` + your provider's domains — the agent reaches its API and nothing else. See [How it works](#how-it-works) · [`examples/agentbox.codex.yaml`](examples/agentbox.codex.yaml). |
+| **Egress allowlist for model APIs** | `network.mode: allowlist` + your provider's domains — the agent reaches its API and nothing else. See [How it works](#how-it-works) · [`examples/andbo.codex.yaml`](examples/andbo.codex.yaml). |
 
 ## Policy
 
-`agentbox init` writes a commented `agentbox.yaml` with secure defaults. See the
-[examples](examples/) (`agentbox.yaml`, `agentbox.strict.yaml`), and run
-`agentbox policy check` to view the effective configuration.
+`andbo init` writes a commented `andbo.yaml` with secure defaults. See the
+[examples](examples/) (`andbo.yaml`, `andbo.strict.yaml`), and run
+`andbo policy check` to view the effective configuration.
 
 Key rules: deny overrides allow; sensitive paths are always denied unless you
 opt in with an explicit unsafe flag; the network defaults to `deny`; no secrets
@@ -419,14 +419,14 @@ A few runtime knobs worth knowing:
   the agent is stopped when it expires (dry-run is unaffected).
 - `runtime.cleanup` is honored: the disposable workspace copy is removed after
   the run; set `cleanup: false` to keep it for debugging. Session artifacts
-  under `.agentbox/sessions/` are always kept.
+  under `.andbo/sessions/` are always kept.
 
 ## Runtime image
 
 Real container runs execute the agent inside a container image (Docker or
 Podman). The default policy references the published, multi-arch
-`ghcr.io/qosikz/agentbox/runtime:latest`, which Docker/Podman **pull
-automatically** on first run — so `agentbox run` works out of the box with no
+`ghcr.io/qosikz/andbo/runtime:latest`, which Docker/Podman **pull
+automatically** on first run — so `andbo run` works out of the box with no
 image to build. The image is a minimal Debian base with `ca-certificates` and
 `git`, run as a non-root user; it is signed and has SLSA build provenance (see
 [Verifying releases](#verifying-releases)).
@@ -435,9 +435,9 @@ Need extra toolchains (node, python, go, your test deps)? Build your own from
 the example and point your policy at it:
 
 ```bash
-docker build -t my/agentbox-runtime:latest -f examples/runtime.Dockerfile examples/
-# then set runtime.image: my/agentbox-runtime:latest in agentbox.yaml
-agentbox run "fix tests"
+docker build -t my/andbo-runtime:latest -f examples/runtime.Dockerfile examples/
+# then set runtime.image: my/andbo-runtime:latest in andbo.yaml
+andbo run "fix tests"
 ```
 
 Prefer not to run a container at all? Use `--dry-run` (the supported preview
@@ -445,7 +445,7 @@ path) or `--runtime local --unsafe` to run on the host.
 
 ## Sessions
 
-Every run is recorded under `.agentbox/sessions/<id>/`:
+Every run is recorded under `.andbo/sessions/<id>/`:
 
 ```text
 session.json   report.md   logs.txt   diff.patch
@@ -456,9 +456,9 @@ Logs and reports are passed through secret redaction before being written.
 
 ## GitHub Action
 
-A composite action lives in [`.github/actions/agentbox`](.github/actions/agentbox);
+A composite action lives in [`.github/actions/andbo`](.github/actions/andbo);
 a safe example workflow is in
-[`examples/github-action-agentbox.yml`](examples/github-action-agentbox.yml). The
+[`examples/github-action-andbo.yml`](examples/github-action-andbo.yml). The
 example defaults to `--dry-run` and uploads the session as an artifact. For fork
 pull requests, keep it dry-run and avoid exposing write tokens.
 
@@ -472,7 +472,7 @@ See [SECURITY.md](SECURITY.md). The security acceptance tests live in
 Release artifacts are built by a pinned GitHub Actions workflow and signed with
 [Sigstore](https://www.sigstore.dev/) keyless signing — no long-lived keys, the
 signing identity is the workflow itself. Every release carries a SPDX **SBOM**
-(`agentbox.spdx.json`) and a **SLSA build-provenance** attestation.
+(`andbo.spdx.json`) and a **SLSA build-provenance** attestation.
 
 Verify the binaries (the signature covers `checksums.txt`, which covers every
 binary by SHA-256):
@@ -483,24 +483,24 @@ binary by SHA-256):
 cosign verify-blob \
   --bundle checksums.txt.cosign.bundle \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/qosikz/agentbox/\.github/workflows/release\.yml@' \
+  --certificate-identity-regexp '^https://github.com/qosikz/andbo/\.github/workflows/release\.yml@' \
   checksums.txt
 
 # 2. your downloaded binary matches the signed checksum
 shasum -a 256 -c checksums.txt --ignore-missing
 
 # 3. (alternative) GitHub-native build provenance
-gh attestation verify agentbox_linux_amd64 --repo qosikz/agentbox
+gh attestation verify andbo_linux_amd64 --repo qosikz/andbo
 ```
 
 Verify the runtime image (signed by digest, with provenance pushed to GHCR):
 
 ```bash
-cosign verify ghcr.io/qosikz/agentbox/runtime:latest \
+cosign verify ghcr.io/qosikz/andbo/runtime:latest \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/qosikz/agentbox/\.github/workflows/publish-image\.yml@'
+  --certificate-identity-regexp '^https://github.com/qosikz/andbo/\.github/workflows/publish-image\.yml@'
 
-gh attestation verify oci://ghcr.io/qosikz/agentbox/runtime:latest --repo qosikz/agentbox
+gh attestation verify oci://ghcr.io/qosikz/andbo/runtime:latest --repo qosikz/andbo
 ```
 
 ## MVP limitations (honest)

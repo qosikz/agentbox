@@ -7,11 +7,11 @@ anything or exposing secrets. The bundled composite Action defaults to
 ## Use the composite action
 
 A worked example lives at
-[`examples/github-action-agentbox.yml`](../examples/github-action-agentbox.yml);
-the action itself is in [`.github/actions/agentbox`](../.github/actions/agentbox).
+[`examples/github-action-andbo.yml`](../examples/github-action-andbo.yml);
+the action itself is in [`.github/actions/andbo`](../.github/actions/andbo).
 
 ```yaml
-name: AgentBox (dry-run)
+name: Andbo (dry-run)
 on:
   pull_request:            # includes fork PRs
 permissions:
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/agentbox
+      - uses: ./.github/actions/andbo
         with:
           task: "review the diff and suggest a fix"
           dry_run: "true"   # plan only; nothing executes

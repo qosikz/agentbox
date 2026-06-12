@@ -71,7 +71,7 @@ func errMsg(err error) string {
 //
 // Untracked (e.g. agent-created) files are included: they are marked
 // intent-to-add first so they appear in the diff as new files. This mutates the
-// index only with intent-to-add markers, which is safe in AgentBox's disposable
+// index only with intent-to-add markers, which is safe in Andbo's disposable
 // workspace copy. Best-effort: a failure here does not fail the diff.
 func (r *Repo) Diff(ctx context.Context) ([]byte, error) {
 	_, _ = run(ctx, "-C", r.Dir, "add", "-N", ".")
@@ -92,7 +92,7 @@ func (r *Repo) Diff(ctx context.Context) ([]byte, error) {
 // "git status --porcelain" collapses a fully-untracked directory to the
 // directory path, while a post-Diff status (Diff runs add -N) reports the
 // individual files — a mismatch that breaks before/after change attribution.
-// Best-effort and safe in AgentBox's disposable workspace copy.
+// Best-effort and safe in Andbo's disposable workspace copy.
 func (r *Repo) MarkIntentToAdd(ctx context.Context) {
 	_, _ = run(ctx, "-C", r.Dir, "add", "-N", ".")
 }
@@ -148,14 +148,14 @@ func unquotePath(p string) string {
 }
 
 // BranchName builds a deterministic-prefix, collision-resistant branch name of
-// the form "agentbox/<slug>-<6 hex>". The random suffix uses crypto/rand so
+// the form "andbo/<slug>-<6 hex>". The random suffix uses crypto/rand so
 // concurrent runs on the same task do not collide.
 func BranchName(task string) string {
 	s := slug(task)
 	if s == "" {
 		s = "task"
 	}
-	return "agentbox/" + s + "-" + randHex(3)
+	return "andbo/" + s + "-" + randHex(3)
 }
 
 // slug lowercases task, collapses any run of non-[a-z0-9] characters into a
@@ -207,7 +207,7 @@ func (r *Repo) CreateBranch(ctx context.Context, name string) error {
 // commit it returns a clear error so the caller can decide how to react.
 //
 // When the repository has no committer identity configured (common on fresh
-// CI runners), the commit is recorded under a neutral "QOSI AgentBox" identity
+// CI runners), the commit is recorded under a neutral "QOSI Andbo" identity
 // instead of failing — the alternative is silently losing the agent's work.
 func (r *Repo) Commit(ctx context.Context, message string) error {
 	if _, err := run(ctx, "-C", r.Dir, "add", "-A"); err != nil {
@@ -224,7 +224,7 @@ func (r *Repo) Commit(ctx context.Context, message string) error {
 	}
 	args := []string{"-C", r.Dir}
 	if !r.hasIdentity(ctx) {
-		args = append(args, "-c", "user.name=QOSI AgentBox", "-c", "user.email=agentbox@qosi.kz")
+		args = append(args, "-c", "user.name=QOSI Andbo", "-c", "user.email=andbo@qosi.kz")
 	}
 	args = append(args, "commit", "-m", message)
 	if _, err := run(ctx, args...); err != nil {
@@ -241,7 +241,7 @@ func (r *Repo) hasIdentity(ctx context.Context) bool {
 }
 
 // FetchBranch copies branch from the repository at fromDir into the repository
-// at repoDir (creating or updating the same-named local branch). AgentBox uses
+// at repoDir (creating or updating the same-named local branch). Andbo uses
 // this to propagate a commit made in a disposable workspace copy back into the
 // user's real repository before the workspace is cleaned up. Fetching (rather
 // than pushing into a non-bare repo) avoids receive-side restrictions.

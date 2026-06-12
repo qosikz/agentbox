@@ -15,10 +15,10 @@ import (
 
 // containerRunner executes commands inside a container via a docker-compatible
 // engine CLI ("docker" or "podman" — podman is CLI-compatible with every
-// argument AgentBox generates).
+// argument Andbo generates).
 //
 // Security note: argument construction is delegated to the pure function
-// BuildDockerArgs so that AgentBox's secure defaults (capabilities dropped,
+// BuildDockerArgs so that Andbo's secure defaults (capabilities dropped,
 // no privilege escalation, no docker socket mount, non-root user, no
 // privileged mode, no host network) can be asserted by tests without invoking
 // the engine.
@@ -306,7 +306,7 @@ func engineFailureError(engine, image string, exitCode int, stderr string) error
 // arguments, so both engines share this builder.
 //
 // This is a PURE function with no side effects: it is the single place where
-// AgentBox's secure container defaults are encoded, and security tests assert
+// Andbo's secure container defaults are encoded, and security tests assert
 // directly on its output. Notably it NEVER adds "--privileged" unless explicitly
 // requested, NEVER mounts the docker socket unless explicitly requested, and
 // maps unknown/empty network modes to the isolated "none" network.
@@ -382,9 +382,9 @@ func containerName() string {
 	if _, err := rand.Read(b); err != nil {
 		// crypto/rand should never fail; a fixed fallback only risks a name
 		// collision, which the engine reports as a startup error.
-		return "agentbox-run"
+		return "andbo-run"
 	}
-	return "agentbox-" + hex.EncodeToString(b)
+	return "andbo-" + hex.EncodeToString(b)
 }
 
 // insertContainerName injects "--name <name>" right after "run --rm" in an

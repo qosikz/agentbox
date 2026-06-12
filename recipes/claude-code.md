@@ -1,6 +1,6 @@
 # Recipe: a safe Claude Code workflow
 
-Run **Claude Code** as the agent inside an AgentBox workspace so it can edit a
+Run **Claude Code** as the agent inside an Andbo workspace so it can edit a
 real repo and open a branch — without uncontrolled access to your host.
 
 ## Why local mode here
@@ -19,17 +19,17 @@ explicitly allowlisted secrets — your broader environment is not passed throug
 
 ```bash
 # 1. Make sure you're logged into Claude Code already (keychain/OAuth).
-agentbox doctor            # shows whether `claude` is found
+andbo doctor            # shows whether `claude` is found
 
 # 2. Run it on a task. The change lands in a disposable copy of your repo,
 #    your test commands re-run, and --commit propagates a new branch back.
-agentbox run "fix the failing test in parser_test.go" \
+andbo run "fix the failing test in parser_test.go" \
   --agent claude \
   --runtime local --yes-unsafe \
   --commit
 
 # 3. Review what happened — diff, commands, audit log.
-agentbox session show latest
+andbo session show latest
 ```
 
 `--yes-unsafe` acknowledges that local mode is an unsafe runtime
@@ -38,7 +38,7 @@ the diff in the session.
 
 ## Customize
 
-- Point at any task; AgentBox substitutes it into the agent invocation.
+- Point at any task; Andbo substitutes it into the agent invocation.
 - Use a different built-in adapter with `--agent codex|gemini|goose|opencode`,
   or the `custom` adapter to run any CLI agent.
 - Prefer full containment over OAuth convenience? Bake the agent into an image

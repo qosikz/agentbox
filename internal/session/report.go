@@ -8,7 +8,7 @@ import (
 // RenderReport renders a session as the Markdown report.md artifact.
 func RenderReport(s Session) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# AgentBox Session Report\n\n")
+	fmt.Fprintf(&b, "# Andbo Session Report\n\n")
 	fmt.Fprintf(&b, "Session: `%s`\n\n", s.ID)
 
 	fmt.Fprintf(&b, "## Summary\n\n")
@@ -79,7 +79,7 @@ func renderCost(c Cost) string {
 	return fmt.Sprintf("USD: %s, Tokens: %s", usd, tokens)
 }
 
-// RenderShow renders the human-readable `agentbox session show` output.
+// RenderShow renders the human-readable `andbo session show` output.
 func RenderShow(s Session) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Session %s\n\n", s.ID)

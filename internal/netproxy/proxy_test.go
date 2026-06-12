@@ -254,7 +254,7 @@ func TestReadyLine(t *testing.T) {
 	// Serve() emits READY; our test helper bypasses Serve, so emit via New-config
 	// path is not exercised here — assert the prefix constant instead, then the
 	// full READY behavior in the e2e (container) test.
-	if AuditPrefix != "AGENTBOX-EGRESS" {
+	if AuditPrefix != "ANDBO-EGRESS" {
 		t.Fatalf("audit prefix changed: %q — the runner's log scanner depends on it", AuditPrefix)
 	}
 	_ = logbuf

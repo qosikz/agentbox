@@ -8,11 +8,11 @@ import (
 	"time"
 )
 
-// secureSpec returns a RuntimeSpec representing AgentBox's secure defaults.
+// secureSpec returns a RuntimeSpec representing Andbo's secure defaults.
 func secureSpec() RuntimeSpec {
 	return RuntimeSpec{
 		Engine:      "docker",
-		Image:       "ghcr.io/qosikz/agentbox:latest",
+		Image:       "ghcr.io/qosikz/andbo:latest",
 		NetworkMode: "none",
 		Workdir:     "/work",
 		User:        "10001:10001",
@@ -75,7 +75,7 @@ func TestBuildDockerArgs_SecureDefaults(t *testing.T) {
 		t.Errorf("must NOT mount docker.sock by default, got %v", args)
 	}
 	// Image and exec must come after the flags, in order.
-	if args[len(args)-3] != "ghcr.io/qosikz/agentbox:latest" {
+	if args[len(args)-3] != "ghcr.io/qosikz/andbo:latest" {
 		t.Errorf("expected image before executable, got %v", args)
 	}
 	if args[len(args)-2] != "agent-cli" || args[len(args)-1] != "--help" {
@@ -383,7 +383,7 @@ func TestPodmanRunner_Available(t *testing.T) {
 }
 
 func TestEngineFailureError(t *testing.T) {
-	const image = "ghcr.io/qosikz/agentbox:latest"
+	const image = "ghcr.io/qosikz/andbo:latest"
 	tests := []struct {
 		name     string
 		engine   string
@@ -395,8 +395,8 @@ func TestEngineFailureError(t *testing.T) {
 		{"exit 1 agent failure", "docker", 1, "test suite failed", false},
 		{"exit 126 not executable", "docker", 126, "permission denied", false},
 		{"exit 127 command not found", "podman", 127, "agent-cli: not found", false},
-		{"exit 125 docker engine failure", "docker", 125, "Unable to find image 'ghcr.io/qosikz/agentbox:latest' locally", true},
-		{"exit 125 podman engine failure", "podman", 125, "Error: ghcr.io/qosikz/agentbox:latest: image not known", true},
+		{"exit 125 docker engine failure", "docker", 125, "Unable to find image 'ghcr.io/qosikz/andbo:latest' locally", true},
+		{"exit 125 podman engine failure", "podman", 125, "Error: ghcr.io/qosikz/andbo:latest: image not known", true},
 		{"exit 125 daemon failure", "docker", 125, "docker: Error response from daemon: something broke", true},
 		// 125 WITHOUT a recognizable engine marker is the agent's own exit code
 		// inside a working container: not an engine failure.
@@ -449,8 +449,8 @@ func TestEngineFailureError_TruncatesStderr(t *testing.T) {
 }
 
 func TestInsertContainerName(t *testing.T) {
-	args := insertContainerName([]string{"run", "--rm", "--cap-drop", "ALL", "img", "echo"}, "agentbox-abc123")
-	want := []string{"run", "--rm", "--name", "agentbox-abc123", "--cap-drop", "ALL", "img", "echo"}
+	args := insertContainerName([]string{"run", "--rm", "--cap-drop", "ALL", "img", "echo"}, "andbo-abc123")
+	want := []string{"run", "--rm", "--name", "andbo-abc123", "--cap-drop", "ALL", "img", "echo"}
 	if len(args) != len(want) {
 		t.Fatalf("len = %d, want %d (%v)", len(args), len(want), args)
 	}
@@ -466,15 +466,15 @@ func TestContainerNameUnique(t *testing.T) {
 	if a == b {
 		t.Errorf("container names should be unique, got %q twice", a)
 	}
-	if !strings.HasPrefix(a, "agentbox-") {
-		t.Errorf("container name should be agentbox-prefixed, got %q", a)
+	if !strings.HasPrefix(a, "andbo-") {
+		t.Errorf("container name should be andbo-prefixed, got %q", a)
 	}
 }
 
 // --- ProbeBinary helpers (pure, no engine required) ---
 
 func TestProbeBinaryArgs_Hardened(t *testing.T) {
-	args := ProbeBinaryArgs("agentbox/codex:latest", "codex")
+	args := ProbeBinaryArgs("andbo/codex:latest", "codex")
 	// Same hardening as a real run, plus full network isolation and self-removal.
 	if len(args) < 2 || args[0] != "run" || args[1] != "--rm" {
 		t.Fatalf("probe must start with `run --rm`, got %v", args)
@@ -501,7 +501,7 @@ func TestProbeBinaryArgs_Hardened(t *testing.T) {
 	// dash-prefixed name is an operand, not a flag) and emits the shell-agnostic
 	// sentinel exit code when the binary is absent.
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "agentbox/codex:latest -c command -v -- 'codex'") {
+	if !strings.Contains(joined, "andbo/codex:latest -c command -v -- 'codex'") {
 		t.Errorf("probe command shape unexpected: %v", args)
 	}
 	if !strings.Contains(joined, "exit 42") {
@@ -568,7 +568,7 @@ func TestLocalRunner_ProbeBinaryUsesHostPath(t *testing.T) {
 // --- Egress allowlist orchestration (pure helpers, no engine required) ---
 
 func TestBuildProxySidecarArgs_Hardened(t *testing.T) {
-	args := BuildProxySidecarArgs("img:latest", "abox-egress-x", "abox-net-x", "/tmp/x/agentbox-netproxy", []string{"api.openai.com", "github.com"}, nil)
+	args := BuildProxySidecarArgs("img:latest", "abox-egress-x", "abox-net-x", "/tmp/x/andbo-netproxy", []string{"api.openai.com", "github.com"}, nil)
 	for _, want := range [][2]string{
 		{"--name", "abox-egress-x"},
 		{"--network", "abox-net-x"},
@@ -576,7 +576,7 @@ func TestBuildProxySidecarArgs_Hardened(t *testing.T) {
 		{"--security-opt", "no-new-privileges"},
 		{"--user", "10001:10001"},
 		{"--pids-limit", "256"},
-		{"--entrypoint", "/agentbox-netproxy"},
+		{"--entrypoint", "/andbo-netproxy"},
 		{"-allow", "api.openai.com,github.com"},
 	} {
 		if !containsPair(args, want[0], want[1]) {
@@ -595,7 +595,7 @@ func TestBuildProxySidecarArgs_Hardened(t *testing.T) {
 	for i, a := range args {
 		if a == "-v" {
 			mounts++
-			if !strings.HasSuffix(args[i+1], ":/agentbox-netproxy:ro") {
+			if !strings.HasSuffix(args[i+1], ":/andbo-netproxy:ro") {
 				t.Errorf("unexpected sidecar mount %q", args[i+1])
 			}
 		}
@@ -609,7 +609,7 @@ func TestBuildProxySidecarArgs_Hardened(t *testing.T) {
 }
 
 func TestBuildProxySidecarArgs_CustomPorts(t *testing.T) {
-	args := BuildProxySidecarArgs("img:latest", "abox-egress-x", "abox-net-x", "/tmp/x/agentbox-netproxy",
+	args := BuildProxySidecarArgs("img:latest", "abox-egress-x", "abox-net-x", "/tmp/x/andbo-netproxy",
 		[]string{"my-service.internal"}, []int{443, 8428})
 	if !containsPair(args, "-ports", "443,8428") {
 		t.Errorf("custom ports must be forwarded to the proxy as -ports: %v", args)
@@ -623,7 +623,7 @@ func TestBuildProxySidecarArgs_CustomPorts(t *testing.T) {
 func TestBuildProxySidecarArgs_NoPorts(t *testing.T) {
 	// Empty/nil ports must OMIT the -ports flag so the proxy keeps its secure
 	// default (80, 443) — this is the backward-compatible path.
-	args := BuildProxySidecarArgs("img:latest", "abox-egress-x", "abox-net-x", "/tmp/x/agentbox-netproxy",
+	args := BuildProxySidecarArgs("img:latest", "abox-egress-x", "abox-net-x", "/tmp/x/andbo-netproxy",
 		[]string{"github.com"}, nil)
 	if contains(args, "-ports") {
 		t.Errorf("nil ports must not pass -ports (proxy defaults to 80,443): %v", args)
@@ -700,15 +700,15 @@ func TestNormalizeArch(t *testing.T) {
 }
 
 func TestParseEgressLines(t *testing.T) {
-	logs := "2026/06/12 09:42:31 AGENTBOX-EGRESS READY listen=[::]:3128 allow=github.com\n" +
+	logs := "2026/06/12 09:42:31 ANDBO-EGRESS READY listen=[::]:3128 allow=github.com\n" +
 		"noise line\n" +
-		"2026/06/12 09:42:33 AGENTBOX-EGRESS ALLOW connect github.com:443\n" +
-		"2026/06/12 09:42:34 AGENTBOX-EGRESS DENY connect gitlab.com:443: host is not in the network.allow list\n"
+		"2026/06/12 09:42:33 ANDBO-EGRESS ALLOW connect github.com:443\n" +
+		"2026/06/12 09:42:34 ANDBO-EGRESS DENY connect gitlab.com:443: host is not in the network.allow list\n"
 	lines := parseEgressLines(logs)
 	if len(lines) != 3 {
 		t.Fatalf("got %d lines, want 3: %v", len(lines), lines)
 	}
-	if !strings.HasPrefix(lines[2], "AGENTBOX-EGRESS DENY connect gitlab.com:443") {
+	if !strings.HasPrefix(lines[2], "ANDBO-EGRESS DENY connect gitlab.com:443") {
 		t.Errorf("timestamp should be stripped, got %q", lines[2])
 	}
 }

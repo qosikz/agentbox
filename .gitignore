@@ -1,6 +1,7 @@
 bin/
 dist/
-.agentbox/
+.andbo/
+/andbo.yaml
 *.test
 coverage.out
 .DS_Store

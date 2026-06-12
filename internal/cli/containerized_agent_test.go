@@ -5,21 +5,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qosikz/agentbox/internal/config"
-	"github.com/qosikz/agentbox/internal/policy"
-	"github.com/qosikz/agentbox/internal/runtime"
+	"github.com/qosikz/andbo/internal/config"
+	"github.com/qosikz/andbo/internal/policy"
+	"github.com/qosikz/andbo/internal/runtime"
 )
 
 // An allowlisted secret must be injected into the CONTAINER environment so a
 // baked-in agent can authenticate, and its value must be redacted from logs.
 func TestAllowedSecretInjectedIntoContainerAndRedacted(t *testing.T) {
-	t.Setenv("AGENTBOX_FAKE_API_KEY", "dummy-not-real-CAFE-value")
+	t.Setenv("ANDBO_FAKE_API_KEY", "dummy-not-real-CAFE-value")
 	cfg := config.DefaultPolicy()
-	cfg.Secrets.Allow = []string{"AGENTBOX_FAKE_API_KEY"}
-	ep := policy.BuildEffectivePolicy(cfg, "agentbox.yaml", policy.Overrides{})
+	cfg.Secrets.Allow = []string{"ANDBO_FAKE_API_KEY"}
+	ep := policy.BuildEffectivePolicy(cfg, "andbo.yaml", policy.Overrides{})
 
 	env := buildAgentEnv(ep)
-	if env["AGENTBOX_FAKE_API_KEY"] != "dummy-not-real-CAFE-value" {
+	if env["ANDBO_FAKE_API_KEY"] != "dummy-not-real-CAFE-value" {
 		t.Fatalf("allowlisted secret not injected into container env: %v", env)
 	}
 	// Container hygiene: the standard Linux PATH, never the host's.
@@ -32,7 +32,7 @@ func TestAllowedSecretInjectedIntoContainerAndRedacted(t *testing.T) {
 	if strings.Contains(out, "dummy-not-real-CAFE-value") {
 		t.Errorf("allowed secret value must be redacted from logs, got %q", out)
 	}
-	if !strings.Contains(out, "[REDACTED:AGENTBOX_FAKE_API_KEY]") {
+	if !strings.Contains(out, "[REDACTED:ANDBO_FAKE_API_KEY]") {
 		t.Errorf("expected named redaction tag, got %q", out)
 	}
 }
@@ -44,7 +44,7 @@ func TestDeniedSecretNotInjectedEvenIfAllowed(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "denied-dummy-value-123")
 	cfg := config.DefaultPolicy() // deny includes OPENAI_API_KEY
 	cfg.Secrets.Allow = []string{"OPENAI_API_KEY"}
-	ep := policy.BuildEffectivePolicy(cfg, "agentbox.yaml", policy.Overrides{})
+	ep := policy.BuildEffectivePolicy(cfg, "andbo.yaml", policy.Overrides{})
 
 	env := buildAgentEnv(ep)
 	if _, ok := env["OPENAI_API_KEY"]; ok {
@@ -142,8 +142,8 @@ func TestRunRecordsEgressDenialsAsPolicyEvents(t *testing.T) {
 	chdir(t, dir)
 
 	fr := &fakeRunner{probePresent: true, egressLog: []string{
-		"AGENTBOX-EGRESS ALLOW connect api.openai.com:443",
-		"AGENTBOX-EGRESS DENY connect evil.example:443: host is not in the network.allow list",
+		"ANDBO-EGRESS ALLOW connect api.openai.com:443",
+		"ANDBO-EGRESS DENY connect evil.example:443: host is not in the network.allow list",
 	}}
 	orig := selectRunnerFn
 	selectRunnerFn = func(ep policy.EffectivePolicy, o runOptions) (runtime.Runner, error) { return fr, nil }
@@ -176,8 +176,8 @@ func TestRecordEgressFieldAnchoredClassification(t *testing.T) {
 	writeExecPolicy(t, dir, "")
 	chdir(t, dir)
 	fr := &fakeRunner{probePresent: true, egressLog: []string{
-		"AGENTBOX-EGRESS ALLOW http DENY github.com:80",                // method literally "DENY" — still ALLOW
-		"AGENTBOX-EGRESS DENY connect ALLOW.example:443: not in allow", // host contains ALLOW — still DENY
+		"ANDBO-EGRESS ALLOW http DENY github.com:80",                // method literally "DENY" — still ALLOW
+		"ANDBO-EGRESS DENY connect ALLOW.example:443: not in allow", // host contains ALLOW — still DENY
 	}}
 	orig := selectRunnerFn
 	selectRunnerFn = func(ep policy.EffectivePolicy, o runOptions) (runtime.Runner, error) { return fr, nil }

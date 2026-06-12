@@ -179,7 +179,7 @@ func TestCreateBranch(t *testing.T) {
 }
 
 func TestBranchName(t *testing.T) {
-	re := regexp.MustCompile(`^agentbox/fix-failing-tests-[0-9a-f]{6}$`)
+	re := regexp.MustCompile(`^andbo/fix-failing-tests-[0-9a-f]{6}$`)
 	got := BranchName("Fix Failing Tests!")
 	if !re.MatchString(got) {
 		t.Errorf("BranchName = %q, does not match %s", got, re)
@@ -192,11 +192,11 @@ func TestSlugCapAndEmpty(t *testing.T) {
 		in   string
 		re   string
 	}{
-		{"empty", "", `^agentbox/task-[0-9a-f]{6}$`},
-		{"only-symbols", "!!!@@@", `^agentbox/task-[0-9a-f]{6}$`},
-		{"leading-trailing", "  Hello  ", `^agentbox/hello-[0-9a-f]{6}$`},
+		{"empty", "", `^andbo/task-[0-9a-f]{6}$`},
+		{"only-symbols", "!!!@@@", `^andbo/task-[0-9a-f]{6}$`},
+		{"leading-trailing", "  Hello  ", `^andbo/hello-[0-9a-f]{6}$`},
 		{"long", "this is a very long task description that should be capped at around forty characters",
-			`^agentbox/[a-z0-9-]{1,40}-[0-9a-f]{6}$`},
+			`^andbo/[a-z0-9-]{1,40}-[0-9a-f]{6}$`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -239,7 +239,7 @@ func TestOpenPRWithoutGH(t *testing.T) {
 	}
 	r := &Repo{Dir: t.TempDir()}
 	out, err := r.OpenPR(context.Background(), PRInput{
-		Title: "t", Body: "b", Base: "main", Branch: "agentbox/x-abcdef",
+		Title: "t", Body: "b", Base: "main", Branch: "andbo/x-abcdef",
 	})
 	if err != nil {
 		t.Fatalf("OpenPR without gh: unexpected error %v", err)
@@ -278,18 +278,18 @@ func TestFetchBranchPropagatesCommit(t *testing.T) {
 	// Simulate a disposable workspace: clone src, branch + commit there.
 	work := filepath.Join(t.TempDir(), "work")
 	gitRun(t, src, "clone", src, work) // -C src irrelevant for clone; produces work
-	gitRun(t, work, "checkout", "-b", "agentbox/test-abc123")
+	gitRun(t, work, "checkout", "-b", "andbo/test-abc123")
 	if err := os.WriteFile(filepath.Join(work, "new.txt"), []byte("agent\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	gitRun(t, work, "add", "-A")
-	gitRun(t, work, "commit", "-m", "agentbox: test")
+	gitRun(t, work, "commit", "-m", "andbo: test")
 
-	if err := FetchBranch(context.Background(), src, work, "agentbox/test-abc123"); err != nil {
+	if err := FetchBranch(context.Background(), src, work, "andbo/test-abc123"); err != nil {
 		t.Fatalf("FetchBranch: %v", err)
 	}
 	// The branch must now exist in the source repo.
-	cmd := exec.Command("git", "-C", src, "rev-parse", "--verify", "agentbox/test-abc123")
+	cmd := exec.Command("git", "-C", src, "rev-parse", "--verify", "andbo/test-abc123")
 	if err := cmd.Run(); err != nil {
 		t.Errorf("branch not propagated into source repo: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestPushBranchEmptyName(t *testing.T) {
 }
 
 // TestCommitWithoutIdentityFallsBack reproduces a fresh CI runner: no global,
-// system, or repo-local git identity. Commit must succeed via the AgentBox
+// system, or repo-local git identity. Commit must succeed via the Andbo
 // fallback identity rather than fail with "Author identity unknown".
 func TestCommitWithoutIdentityFallsBack(t *testing.T) {
 	gitOrSkip(t)
@@ -321,14 +321,14 @@ func TestCommitWithoutIdentityFallsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &Repo{Dir: repo}
-	if err := r.Commit(context.Background(), "agentbox: test"); err != nil {
+	if err := r.Commit(context.Background(), "andbo: test"); err != nil {
 		t.Fatalf("Commit without identity should fall back, got: %v", err)
 	}
 	out, err := exec.Command("git", "-C", repo, "log", "-1", "--format=%ae").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(out); !strings.Contains(got, "agentbox@qosi.kz") {
-		t.Errorf("fallback committer = %q, want agentbox@qosi.kz", got)
+	if got := string(out); !strings.Contains(got, "andbo@qosi.kz") {
+		t.Errorf("fallback committer = %q, want andbo@qosi.kz", got)
 	}
 }

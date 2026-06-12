@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/qosikz/agentbox/internal/config"
-	"github.com/qosikz/agentbox/internal/netproxy"
+	"github.com/qosikz/andbo/internal/config"
+	"github.com/qosikz/andbo/internal/netproxy"
 )
 
 type doctorCheck struct {
@@ -22,7 +22,7 @@ func (r *Root) cmdDoctor(args []string) error {
 	var checks []doctorCheck
 
 	checks = append(checks, doctorCheck{"os", true, runtime.GOOS + "/" + runtime.GOARCH})
-	checks = append(checks, doctorCheck{"agentbox", true, r.Version})
+	checks = append(checks, doctorCheck{"andbo", true, r.Version})
 
 	for _, bin := range []string{"docker", "podman", "git", "gh"} {
 		path, err := exec.LookPath(bin)
@@ -34,14 +34,14 @@ func (r *Root) cmdDoctor(args []string) error {
 	}
 
 	// Config file.
-	if _, err := os.Stat("agentbox.yaml"); err == nil {
-		if _, lerr := config.LoadPolicy("agentbox.yaml"); lerr != nil {
-			checks = append(checks, doctorCheck{"config", false, "agentbox.yaml present but invalid"})
+	if _, err := os.Stat("andbo.yaml"); err == nil {
+		if _, lerr := config.LoadPolicy("andbo.yaml"); lerr != nil {
+			checks = append(checks, doctorCheck{"config", false, "andbo.yaml present but invalid"})
 		} else {
-			checks = append(checks, doctorCheck{"config", true, "agentbox.yaml valid"})
+			checks = append(checks, doctorCheck{"config", true, "andbo.yaml valid"})
 		}
 	} else {
-		checks = append(checks, doctorCheck{"config", false, "no agentbox.yaml (run 'agentbox init')"})
+		checks = append(checks, doctorCheck{"config", false, "no andbo.yaml (run 'andbo init')"})
 	}
 
 	// Known agent CLIs.
@@ -67,18 +67,18 @@ func (r *Root) cmdDoctor(args []string) error {
 		checks = append(checks, doctorCheck{"egress-proxy", false, "not embedded (dev build?); network allowlist cannot be enforced — build with `make build`"})
 	}
 
-	// Write access to .agentbox/.
-	if err := os.MkdirAll(".agentbox", 0o755); err != nil {
-		checks = append(checks, doctorCheck{".agentbox", false, err.Error()})
+	// Write access to .andbo/.
+	if err := os.MkdirAll(".andbo", 0o755); err != nil {
+		checks = append(checks, doctorCheck{".andbo", false, err.Error()})
 	} else {
-		checks = append(checks, doctorCheck{".agentbox", true, "writable"})
+		checks = append(checks, doctorCheck{".andbo", true, "writable"})
 	}
 
 	if jsonOut {
 		return printJSON(os.Stdout, checks)
 	}
 
-	fmt.Println("AgentBox doctor")
+	fmt.Println("Andbo doctor")
 	fmt.Println()
 	for _, c := range checks {
 		mark := "✓"

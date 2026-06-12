@@ -1,5 +1,5 @@
 // Package mcpserve implements a minimal Model Context Protocol (MCP) stdio
-// server that exposes AgentBox's sandbox operations as tools, so any
+// server that exposes Andbo's sandbox operations as tools, so any
 // MCP-capable agent harness (Claude Code, OpenClaw, Codex CLI, Gemini CLI,
 // Goose, OpenCode, ...) can run commands and agents in isolated, policy-
 // controlled workspaces.
@@ -7,7 +7,7 @@
 // Transport: newline-delimited JSON-RPC 2.0 over stdio. Nothing but protocol
 // messages may be written to stdout; diagnostics go to stderr.
 //
-// Security: tool calls execute the agentbox CLI itself (self-exec) with
+// Security: tool calls execute the andbo CLI itself (self-exec) with
 // --json, under the policy file in the working directory. Unsafe modes
 // (--unsafe, --runtime local, --allow-*) are NOT reachable through MCP tools:
 // a harness must never be able to silently escalate past the policy.
@@ -33,17 +33,17 @@ import (
 // because several clients still send them.
 var protocolVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
 
-// CLIRunner executes the agentbox CLI and returns its stdout, exit code, and
+// CLIRunner executes the andbo CLI and returns its stdout, exit code, and
 // any spawn error. Injected so tests can stub the CLI.
 type CLIRunner func(ctx context.Context, args []string) (stdout string, exitCode int, err error)
 
 // Server is a minimal tools-only MCP server.
 type Server struct {
-	Version string    // agentbox version, reported in serverInfo
+	Version string    // andbo version, reported in serverInfo
 	Run     CLIRunner // tool executor; defaults to self-exec
 }
 
-// New returns a Server that self-execs the current agentbox binary.
+// New returns a Server that self-execs the current andbo binary.
 func New(version string) *Server {
 	return &Server{Version: version, Run: selfExec}
 }
@@ -53,7 +53,7 @@ func New(version string) *Server {
 func selfExec(ctx context.Context, args []string) (string, int, error) {
 	bin, err := os.Executable()
 	if err != nil {
-		return "", -1, fmt.Errorf("locating agentbox binary: %w", err)
+		return "", -1, fmt.Errorf("locating andbo binary: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 35*time.Minute)
 	defer cancel()
@@ -168,12 +168,12 @@ func (s *Server) initializeResult(params json.RawMessage) map[string]any {
 	return map[string]any{
 		"protocolVersion": version,
 		"capabilities":    map[string]any{"tools": map[string]any{}},
-		"serverInfo":      map[string]any{"name": "agentbox", "version": s.Version},
-		"instructions": "AgentBox provides isolated, policy-controlled sandboxes. " +
+		"serverInfo":      map[string]any{"name": "andbo", "version": s.Version},
+		"instructions": "Andbo provides isolated, policy-controlled sandboxes. " +
 			"Use sandbox_exec to safely try commands or validate generated code, " +
 			"sandbox_run to drive a coding agent on a task, scan_mcp to vet an MCP " +
 			"server before trusting it, and the session tools to audit past runs. " +
-			"All runs are governed by the agentbox.yaml policy in the working " +
+			"All runs are governed by the andbo.yaml policy in the working " +
 			"directory; unsafe modes are not available through this server.",
 	}
 }
@@ -197,7 +197,7 @@ func toolDefinitions() []toolDef {
 	return []toolDef{
 		{
 			Name: "sandbox_exec",
-			Description: "Run a shell command inside an isolated AgentBox workspace " +
+			Description: "Run a shell command inside an isolated Andbo workspace " +
 				"(container by default, network denied, sensitive files excluded, " +
 				"session recorded). Use this to safely test commands, run test " +
 				"suites against generated code, or try anything risky. Returns " +
@@ -210,8 +210,8 @@ func toolDefinitions() []toolDef {
 		},
 		{
 			Name: "sandbox_run",
-			Description: "Run a coding-agent task inside an isolated AgentBox " +
-				"workspace using the agent adapter configured in agentbox.yaml " +
+			Description: "Run a coding-agent task inside an isolated Andbo " +
+				"workspace using the agent adapter configured in andbo.yaml " +
 				"(or the agent argument). The agent edits a disposable copy; " +
 				"diffs, tests, and logs are captured in a session.",
 			InputSchema: obj(map[string]any{
@@ -232,7 +232,7 @@ func toolDefinitions() []toolDef {
 		},
 		{
 			Name:        "session_list",
-			Description: "List recorded AgentBox sessions (audit log of every sandboxed run).",
+			Description: "List recorded Andbo sessions (audit log of every sandboxed run).",
 			InputSchema: obj(map[string]any{}),
 		},
 		{
@@ -264,7 +264,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) map[strin
 
 	stdout, exitCode, runErr := s.Run(ctx, args)
 	if runErr != nil {
-		return toolError("agentbox execution failed: " + runErr.Error())
+		return toolError("andbo execution failed: " + runErr.Error())
 	}
 
 	text := strings.TrimSpace(stdout)
@@ -277,7 +277,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) map[strin
 	}
 }
 
-// cliArgsFor maps a tool call onto agentbox CLI arguments. Only safe,
+// cliArgsFor maps a tool call onto andbo CLI arguments. Only safe,
 // policy-governed operations are exposed; no unsafe flag is ever emitted.
 func cliArgsFor(p callParams) ([]string, error) {
 	str := func(key string) string {

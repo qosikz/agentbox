@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/qosikz/agentbox/internal/config"
-	"github.com/qosikz/agentbox/internal/policy"
+	"github.com/qosikz/andbo/internal/config"
+	"github.com/qosikz/andbo/internal/policy"
 )
 
 // newRepo builds a temp repo with a known layout and returns its root.
@@ -14,11 +14,11 @@ func newRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		filepath.Join("src", "main.go"):          "package main\n",
-		".env":                                   "SECRET=1\n",
-		"README.md":                              "# readme\n",
-		filepath.Join(".git", "HEAD"):            "ref: refs/heads/main\n",
-		filepath.Join(".agentbox", "state.json"): "{}\n",
+		filepath.Join("src", "main.go"):       "package main\n",
+		".env":                                "SECRET=1\n",
+		"README.md":                           "# readme\n",
+		filepath.Join(".git", "HEAD"):         "ref: refs/heads/main\n",
+		filepath.Join(".andbo", "state.json"): "{}\n",
 	}
 	for rel, content := range files {
 		abs := filepath.Join(root, rel)
@@ -160,9 +160,9 @@ func TestPrepare(t *testing.T) {
 	absent := []string{
 		".env",
 		".git",
-		".agentbox",
+		".andbo",
 		filepath.Join(".git", "HEAD"),
-		filepath.Join(".agentbox", "state.json"),
+		filepath.Join(".andbo", "state.json"),
 	}
 	for _, rel := range absent {
 		if _, err := os.Stat(filepath.Join(dest, rel)); !os.IsNotExist(err) {

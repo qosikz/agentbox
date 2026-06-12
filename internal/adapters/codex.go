@@ -20,9 +20,9 @@ import (
 // the runtime image.
 //
 // Sandbox note: Codex ships its own Landlock/Seatbelt sandbox, which can
-// conflict with container runtimes. Inside a fully isolated AgentBox
+// conflict with container runtimes. Inside a fully isolated Andbo
 // container, users may pass --dangerously-bypass-approvals-and-sandbox via
-// ExtraArgs; AgentBox's container isolation is then the enforcement boundary.
+// ExtraArgs; Andbo's container isolation is then the enforcement boundary.
 type CodexAdapter struct{}
 
 // Name returns the adapter identifier.

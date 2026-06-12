@@ -10,24 +10,24 @@ The bundled **stub agent** exercises the whole harness → sandbox → agent flo
 zero cost:
 
 ```bash
-docker build -t agentbox/stub-agent:latest -f examples/agents/stub.Dockerfile examples/agents
-AGENTBOX_FAKE_API_KEY=dummy-not-a-real-key \
-  agentbox run "prove the path" --policy examples/agentbox.stub.yaml
-agentbox session show latest   # the dummy key shows only as [REDACTED:...]
+docker build -t andbo/stub-agent:latest -f examples/agents/stub.Dockerfile examples/agents
+ANDBO_FAKE_API_KEY=dummy-not-a-real-key \
+  andbo run "prove the path" --policy examples/andbo.stub.yaml
+andbo session show latest   # the dummy key shows only as [REDACTED:...]
 ```
 
 ## Run Codex containerized
 
 ```bash
 # 1. Build an image with the agent CLI baked in.
-docker build -t agentbox/codex:latest -f examples/agents/codex.Dockerfile examples/agents
+docker build -t andbo/codex:latest -f examples/agents/codex.Dockerfile examples/agents
 
 # 2. Inject the key at runtime (NEVER baked into the image) and run.
 export CODEX_API_KEY=sk-...
-agentbox run "add a test for parseConfig" --policy examples/agentbox.codex.yaml
+andbo run "add a test for parseConfig" --policy examples/andbo.codex.yaml
 ```
 
-The policy [`examples/agentbox.codex.yaml`](../examples/agentbox.codex.yaml) uses
+The policy [`examples/andbo.codex.yaml`](../examples/andbo.codex.yaml) uses
 `network.mode: allowlist` with `api.openai.com`, so a real run needs **no**
 `--yes-unsafe` — the agent reaches its model API and nothing else.
 
@@ -38,7 +38,7 @@ The policy [`examples/agentbox.codex.yaml`](../examples/agentbox.codex.yaml) use
 ## Why the key is safe
 
 - **Never in the image.** Image layers are immutable and would leak a baked-in
-  secret via `docker history` / `docker save` / a registry push. AgentBox reads
+  secret via `docker history` / `docker save` / a registry push. Andbo reads
   the key from your host env and injects it only when `secrets.allow` lists it
   (and `secrets.deny` does not), redacting the value from logs, diffs, and the
   saved session.

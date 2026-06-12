@@ -1,15 +1,15 @@
-# CLAUDE.md — AgentBox Project Instructions
+# CLAUDE.md — Andbo Project Instructions
 
-You are helping build **AgentBox**, an open-source secure runtime for AI coding agents.
+You are helping build **Andbo**, an open-source secure runtime for AI coding agents.
 
 ## Product summary
 
-AgentBox lets developers run AI coding agents in isolated, reproducible, policy-controlled workspaces.
+Andbo lets developers run AI coding agents in isolated, reproducible, policy-controlled workspaces.
 
 The core command is:
 
 ```bash
-agentbox run "fix failing tests"
+andbo run "fix failing tests"
 ```
 
 The product must protect secrets, restrict filesystem/network access, scan MCP tools, record sessions, generate diffs, run tests, and optionally open pull requests.
@@ -36,7 +36,7 @@ Use Go for the core CLI/runtime.
 Follow this structure:
 
 ```text
-cmd/agentbox/
+cmd/andbo/
 internal/cli/
 internal/config/
 internal/policy/
@@ -54,13 +54,13 @@ internal/report/
 
 P0:
 
-- `agentbox init`
-- `agentbox run`
-- `agentbox policy check`
-- `agentbox doctor`
-- `agentbox session list`
-- `agentbox session show`
-- `agentbox mcp scan`
+- `andbo init`
+- `andbo run`
+- `andbo policy check`
+- `andbo doctor`
+- `andbo session list`
+- `andbo session show`
+- `andbo mcp scan`
 - YAML policy loading
 - Docker runtime abstraction
 - Custom adapter

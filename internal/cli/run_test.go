@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qosikz/agentbox/internal/config"
-	"github.com/qosikz/agentbox/internal/session"
+	"github.com/qosikz/andbo/internal/config"
+	"github.com/qosikz/andbo/internal/session"
 )
 
 // chdir changes into dir for the duration of the test (Go 1.23 compatible;
@@ -32,7 +32,7 @@ func chdir(t *testing.T, dir string) {
 func setupProject(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := config.WriteDefaultPolicy(filepath.Join(dir, "agentbox.yaml")); err != nil {
+	if err := config.WriteDefaultPolicy(filepath.Join(dir, "andbo.yaml")); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
@@ -118,7 +118,7 @@ func TestRunMissingTask(t *testing.T) {
 
 func TestRunInvalidPolicyExit7(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "agentbox.yaml"), []byte("network:\n  mode: nonsense\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "andbo.yaml"), []byte("network:\n  mode: nonsense\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	chdir(t, dir)
@@ -186,7 +186,7 @@ const noTestsPolicy = "agent:\n  default: custom\n  custom:\n    command: echo\n
 
 func TestRunCleanupRemovesWorkspace(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "agentbox.yaml"), []byte(noTestsPolicy), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "andbo.yaml"), []byte(noTestsPolicy), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	chdir(t, dir)
@@ -195,9 +195,9 @@ func TestRunCleanupRemovesWorkspace(t *testing.T) {
 		t.Fatalf("run: %v (code %d)", err, CodeFor(err))
 	}
 	// cleanup defaults to true: the disposable work dir must be gone.
-	entries, _ := os.ReadDir(filepath.Join(dir, ".agentbox", "work"))
+	entries, _ := os.ReadDir(filepath.Join(dir, ".andbo", "work"))
 	if len(entries) != 0 {
-		t.Errorf("expected .agentbox/work to be cleaned, found %d entries", len(entries))
+		t.Errorf("expected .andbo/work to be cleaned, found %d entries", len(entries))
 	}
 	// Session artifacts are always kept.
 	if _, err := session.List(dir); err != nil {
@@ -208,7 +208,7 @@ func TestRunCleanupRemovesWorkspace(t *testing.T) {
 func TestRunCleanupFalseKeepsWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	pol := noTestsPolicy + "runtime:\n  isolation: container\n  engine: docker\n  image: img\n  cleanup: false\n"
-	if err := os.WriteFile(filepath.Join(dir, "agentbox.yaml"), []byte(pol), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "andbo.yaml"), []byte(pol), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	chdir(t, dir)
@@ -216,7 +216,7 @@ func TestRunCleanupFalseKeepsWorkspace(t *testing.T) {
 	if err := r.cmdRun(context.Background(), []string{"hello", "--runtime", "local", "--yes-unsafe"}); err != nil {
 		t.Fatalf("run: %v (code %d)", err, CodeFor(err))
 	}
-	entries, _ := os.ReadDir(filepath.Join(dir, ".agentbox", "work"))
+	entries, _ := os.ReadDir(filepath.Join(dir, ".andbo", "work"))
 	if len(entries) == 0 {
 		t.Error("cleanup: false should keep the workspace copy for debugging")
 	}
@@ -229,7 +229,7 @@ func TestRunCommitSurvivesCleanup(t *testing.T) {
 		t.Skip("git not available")
 	}
 	// Hermetic git environment: no host/global identity, like a CI runner.
-	// The commit must still succeed via the AgentBox fallback identity.
+	// The commit must still succeed via the Andbo fallback identity.
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
 	dir := t.TempDir()
@@ -249,7 +249,7 @@ func TestRunCommitSurvivesCleanup(t *testing.T) {
 	gitc("commit", "-m", "init")
 	// Agent creates a file; default cleanup=true; commit requested.
 	pol := "agent:\n  default: custom\n  custom:\n    command: sh\n    args: [\"-c\", \"echo agent > agent.txt\"]\ntests:\n  commands: []\n"
-	if err := os.WriteFile(filepath.Join(dir, "agentbox.yaml"), []byte(pol), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "andbo.yaml"), []byte(pol), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	gitc("add", "-A")
@@ -262,12 +262,12 @@ func TestRunCommitSurvivesCleanup(t *testing.T) {
 	}
 
 	// The workspace must be cleaned AND the branch must exist in the source repo.
-	if entries, _ := os.ReadDir(filepath.Join(dir, ".agentbox", "work")); len(entries) != 0 {
+	if entries, _ := os.ReadDir(filepath.Join(dir, ".andbo", "work")); len(entries) != 0 {
 		t.Errorf("workspace should be cleaned after successful propagation, found %d entries", len(entries))
 	}
-	out, err := exec.Command("git", "-C", dir, "branch", "--list", "agentbox/*").Output()
-	if err != nil || !strings.Contains(string(out), "agentbox/") {
-		t.Errorf("agentbox branch missing from source repo after cleanup; branches: %q err=%v", out, err)
+	out, err := exec.Command("git", "-C", dir, "branch", "--list", "andbo/*").Output()
+	if err != nil || !strings.Contains(string(out), "andbo/") {
+		t.Errorf("andbo branch missing from source repo after cleanup; branches: %q err=%v", out, err)
 	}
 	// And the commit on that branch must contain the agent's file.
 	s := latestSession(t, dir)
@@ -289,7 +289,7 @@ func TestRunBudgetExceeded(t *testing.T) {
 
 	dir := t.TempDir()
 	pol := "agent:\n  default: custom\n  custom:\n    command: sleep\n    args: [\"5\"]\nbudget:\n  max_runtime_minutes: 1\ntests:\n  commands: []\n"
-	if err := os.WriteFile(filepath.Join(dir, "agentbox.yaml"), []byte(pol), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "andbo.yaml"), []byte(pol), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	chdir(t, dir)

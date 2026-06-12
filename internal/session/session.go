@@ -1,6 +1,6 @@
-// Package session records an auditable artifact for every AgentBox run.
+// Package session records an auditable artifact for every Andbo run.
 //
-// A session lives under .agentbox/sessions/<id>/ and contains the structured
+// A session lives under .andbo/sessions/<id>/ and contains the structured
 // record (session.json), a human report (report.md), redacted logs, the diff,
 // policy events, and test results. All persisted text passes through secret
 // redaction before it touches disk.
@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qosikz/agentbox/internal/secrets"
+	"github.com/qosikz/andbo/internal/secrets"
 )
 
 // Session is the structured record persisted as session.json.
@@ -306,7 +306,7 @@ func shortID() string {
 
 // SessionsDir returns the sessions root for a workspace base directory.
 func SessionsDir(base string) string {
-	return filepath.Join(base, ".agentbox", "sessions")
+	return filepath.Join(base, ".andbo", "sessions")
 }
 
 // List returns all sessions under base, newest first.
@@ -350,7 +350,7 @@ func Load(base, id string) (Session, error) {
 	// separators and parent references so a crafted id cannot escape the
 	// sessions directory.
 	if strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") {
-		return Session{}, fmt.Errorf("invalid session id %q; run 'agentbox session list' to see valid ids", id)
+		return Session{}, fmt.Errorf("invalid session id %q; run 'andbo session list' to see valid ids", id)
 	}
 	return readSession(filepath.Join(SessionsDir(base), id))
 }

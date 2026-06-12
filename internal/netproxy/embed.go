@@ -27,7 +27,7 @@ func binaryName(arch string) string {
 }
 
 // Embedded reports whether the proxy binary for arch is embedded in this
-// build. Used by `agentbox doctor` to report allowlist enforceability.
+// build. Used by `andbo doctor` to report allowlist enforceability.
 func Embedded(arch string) bool {
 	f, err := embeddedFS.Open(binaryName(arch))
 	if err != nil {
@@ -52,9 +52,9 @@ func extractFrom(fsys fs.FS, arch, dir string) (string, error) {
 	data, err := fs.ReadFile(fsys, binaryName(arch))
 	if err != nil {
 		return "", fmt.Errorf(
-			"the egress proxy binary for linux/%s is not embedded in this agentbox build, so network.mode=allowlist cannot be enforced.\nUse a released binary, or build with `make build` (which embeds the proxy via `make proxy`).\nAlternatively set network.mode to deny, or open (unsafe).", arch)
+			"the egress proxy binary for linux/%s is not embedded in this andbo build, so network.mode=allowlist cannot be enforced.\nUse a released binary, or build with `make build` (which embeds the proxy via `make proxy`).\nAlternatively set network.mode to deny, or open (unsafe).", arch)
 	}
-	path := filepath.Join(dir, "agentbox-netproxy")
+	path := filepath.Join(dir, "andbo-netproxy")
 	if err := os.WriteFile(path, data, 0o755); err != nil {
 		return "", fmt.Errorf("writing egress proxy binary to %s: %w", path, err)
 	}

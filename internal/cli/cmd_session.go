@@ -5,12 +5,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/qosikz/agentbox/internal/session"
+	"github.com/qosikz/andbo/internal/session"
 )
 
 func (r *Root) cmdSession(args []string) error {
 	if len(args) == 0 {
-		return codedf(ExitGeneral, "usage: agentbox session <list|show|replay> [id|latest] [--json]")
+		return codedf(ExitGeneral, "usage: andbo session <list|show|replay> [id|latest] [--json]")
 	}
 	base, _ := os.Getwd()
 	jsonOut := hasFlag(args, "--json")
@@ -46,7 +46,7 @@ func sessionList(base string, jsonOut bool) error {
 		return printJSON(os.Stdout, list)
 	}
 	if len(list) == 0 {
-		fmt.Println("No sessions yet. Run: agentbox run \"fix failing tests\" --dry-run")
+		fmt.Println("No sessions yet. Run: andbo run \"fix failing tests\" --dry-run")
 		return nil
 	}
 	fmt.Printf("%-26s %-8s %-9s %s\n", "ID", "AGENT", "STATUS", "TASK")

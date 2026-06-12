@@ -7,14 +7,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/qosikz/agentbox/internal/config"
-	"github.com/qosikz/agentbox/internal/mcpguard"
-	"github.com/qosikz/agentbox/internal/mcpserve"
+	"github.com/qosikz/andbo/internal/config"
+	"github.com/qosikz/andbo/internal/mcpguard"
+	"github.com/qosikz/andbo/internal/mcpserve"
 )
 
 func (r *Root) cmdMCP(args []string) error {
 	if len(args) == 0 {
-		return codedf(ExitGeneral, "usage: agentbox mcp <scan|list|serve> [path] [--json]")
+		return codedf(ExitGeneral, "usage: andbo mcp <scan|list|serve> [path] [--json]")
 	}
 	switch args[0] {
 	case "scan":
@@ -31,7 +31,7 @@ func (r *Root) cmdMCP(args []string) error {
 // mcpServe runs the MCP stdio server until stdin closes. Only protocol
 // messages go to stdout; all diagnostics go to stderr.
 func (r *Root) mcpServe() error {
-	fmt.Fprintln(os.Stderr, "agentbox MCP server listening on stdio (policy: agentbox.yaml in CWD)")
+	fmt.Fprintln(os.Stderr, "andbo MCP server listening on stdio (policy: andbo.yaml in CWD)")
 	srv := mcpserve.New(r.Version)
 	if err := srv.Serve(context.Background(), os.Stdin, os.Stdout); err != nil {
 		return coded(ExitGeneral, err)
@@ -49,12 +49,12 @@ func mcpScan(args []string) error {
 		}
 	}
 	if target == "" {
-		return codedf(ExitGeneral, "usage: agentbox mcp scan <path> [--json]")
+		return codedf(ExitGeneral, "usage: andbo mcp scan <path> [--json]")
 	}
 	// Prefer a local path: only reject as "remote" when the target does not
 	// exist on disk and looks like a remote repository reference.
 	if _, statErr := os.Stat(target); statErr != nil && looksLikeRepo(target) {
-		return codedf(ExitGeneral, "remote MCP scanning is not supported yet.\nClone the server locally and scan the path:\n  git clone %s && agentbox mcp scan ./<dir>", target)
+		return codedf(ExitGeneral, "remote MCP scanning is not supported yet.\nClone the server locally and scan the path:\n  git clone %s && andbo mcp scan ./<dir>", target)
 	}
 
 	report, err := mcpguard.Scan(target)
@@ -81,7 +81,7 @@ func mcpScan(args []string) error {
 
 func mcpList(args []string) error {
 	jsonOut := hasFlag(args, "--json")
-	path := flagValue(args, "--policy", "agentbox.yaml")
+	path := flagValue(args, "--policy", "andbo.yaml")
 	cfg, err := config.LoadPolicy(path)
 	if err != nil {
 		return coded(ExitInvalidConfig, err)

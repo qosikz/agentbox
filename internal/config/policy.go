@@ -1,6 +1,6 @@
-// Package config loads, defaults, validates, and serializes AgentBox policy.
+// Package config loads, defaults, validates, and serializes Andbo policy.
 //
-// A policy is read from agentbox.yaml and merged over secure built-in
+// A policy is read from andbo.yaml and merged over secure built-in
 // defaults. The config package is intentionally dumb: it parses YAML and
 // reports syntactic/semantic validity. Security-derived decisions (mandatory
 // denies, deny-overrides-allow, unsafe gating) live in the policy package,
@@ -105,13 +105,13 @@ type TestsPolicy struct {
 }
 
 // DefaultPolicy returns the secure built-in defaults. These are applied
-// before any agentbox.yaml is decoded on top.
+// before any andbo.yaml is decoded on top.
 func DefaultPolicy() Policy {
 	return Policy{
 		Runtime: RuntimePolicy{
 			Isolation: "container",
 			Engine:    "docker",
-			Image:     "ghcr.io/qosikz/agentbox/runtime:latest",
+			Image:     "ghcr.io/qosikz/andbo/runtime:latest",
 			Cleanup:   true,
 		},
 		Agent: AgentPolicy{
@@ -169,20 +169,20 @@ func LoadPolicy(path string) (Policy, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&p); err != nil {
-		return p, fmt.Errorf("invalid policy %s: %w\n\nFix the YAML syntax or remove unknown keys, then run 'agentbox policy check'.", path, err)
+		return p, fmt.Errorf("invalid policy %s: %w\n\nFix the YAML syntax or remove unknown keys, then run 'andbo policy check'.", path, err)
 	}
 	return p, nil
 }
 
-// DefaultPolicyYAML is the commented starter policy written by `agentbox init`.
-const DefaultPolicyYAML = `# AgentBox policy
+// DefaultPolicyYAML is the commented starter policy written by `andbo init`.
+const DefaultPolicyYAML = `# Andbo policy
 # Secure defaults. Edit deliberately; unsafe options require explicit flags.
-# Validate with: agentbox policy check
+# Validate with: andbo policy check
 
 runtime:
   isolation: container        # container (safe) | local (unsafe)
   engine: docker              # docker | podman
-  image: ghcr.io/qosikz/agentbox/runtime:latest   # published default; pull is automatic
+  image: ghcr.io/qosikz/andbo/runtime:latest   # published default; pull is automatic
   cleanup: true
 
 agent:

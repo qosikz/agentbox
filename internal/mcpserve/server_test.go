@@ -56,7 +56,7 @@ func TestInitializeHandshake(t *testing.T) {
 		t.Errorf("protocolVersion = %v, want echo of 2025-03-26", result["protocolVersion"])
 	}
 	info := result["serverInfo"].(map[string]any)
-	if info["name"] != "agentbox" {
+	if info["name"] != "andbo" {
 		t.Errorf("serverInfo.name = %v", info["name"])
 	}
 }

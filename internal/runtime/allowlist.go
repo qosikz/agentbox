@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qosikz/agentbox/internal/netproxy"
+	"github.com/qosikz/andbo/internal/netproxy"
 )
 
 // Egress allowlist enforcement.
@@ -52,9 +52,9 @@ func (r containerRunner) setupAllowlist(ctx context.Context, spec RuntimeSpec) (
 	sfx := randomSuffix()
 	es = &egressSession{
 		engine:   r.engine,
-		network:  "agentbox-net-" + sfx,
-		extNet:   "agentbox-ext-" + sfx,
-		proxyCtr: "agentbox-egress-" + sfx,
+		network:  "andbo-net-" + sfx,
+		extNet:   "andbo-ext-" + sfx,
+		proxyCtr: "andbo-egress-" + sfx,
 	}
 	defer func() {
 		if err != nil {
@@ -67,7 +67,7 @@ func (r containerRunner) setupAllowlist(ctx context.Context, spec RuntimeSpec) (
 	if archErr != nil {
 		return es, archErr
 	}
-	es.tmpDir, err = os.MkdirTemp("", "agentbox-egress-")
+	es.tmpDir, err = os.MkdirTemp("", "andbo-egress-")
 	if err != nil {
 		return es, fmt.Errorf("creating temp dir for egress proxy: %w", err)
 	}
@@ -137,7 +137,7 @@ func (es *egressSession) removeNetwork(ctx context.Context, name string) {
 		if out, err := exec.CommandContext(ctx, es.engine, "network", "rm", name).CombinedOutput(); err == nil {
 			return
 		} else if attempt == 4 {
-			fmt.Fprintf(os.Stderr, "agentbox: could not remove egress network %s (leaked): %s\n", name, firstLine(out, err))
+			fmt.Fprintf(os.Stderr, "andbo: could not remove egress network %s (leaked): %s\n", name, firstLine(out, err))
 			return
 		}
 		// Best-effort: detach any lingering endpoints, then wait and retry.
@@ -166,7 +166,7 @@ func (es *egressSession) endpoints(ctx context.Context, name string) (int, error
 	return n, nil
 }
 
-// collectLog returns the sidecar's audit lines (AGENTBOX-EGRESS ...) so the
+// collectLog returns the sidecar's audit lines (ANDBO-EGRESS ...) so the
 // CLI can record them in the session. Best-effort: an unreadable log yields
 // nil rather than failing a finished run.
 func (es *egressSession) collectLog() []string {
@@ -267,8 +267,8 @@ func BuildProxySidecarArgs(image, name, network, binPath string, domains []strin
 		"--user", "10001:10001",
 		"--read-only",         // the proxy writes nothing to disk
 		"--pids-limit", "256", // bound process/goroutine-thread explosion
-		"-v", binPath + ":/agentbox-netproxy:ro",
-		"--entrypoint", "/agentbox-netproxy",
+		"-v", binPath + ":/andbo-netproxy:ro",
+		"--entrypoint", "/andbo-netproxy",
 		image,
 		"-listen", ":3128",
 		"-allow", strings.Join(domains, ","),
@@ -339,7 +339,7 @@ func parseEgressLines(logs string) []string {
 
 // randomSuffix returns 12 hex chars for collision-resistant resource names.
 func randomSuffix() string {
-	return strings.TrimPrefix(containerName(), "agentbox-")
+	return strings.TrimPrefix(containerName(), "andbo-")
 }
 
 // firstLine condenses engine CLI output (or the exec error) into a single

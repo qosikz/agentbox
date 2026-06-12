@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# AgentBox egress-enforcement demo — recordable with asciinema.
+# Andbo egress-enforcement demo — recordable with asciinema.
 #
 #   asciinema rec egress.cast --idle-time-limit 1.5 --cols 92 --rows 28 \
 #     -c demo/egress-demo.sh
@@ -10,27 +10,27 @@
 # closed), find DNS dead (no exfil side channel), and see it all in the audit
 # trail. Everything is real — real Docker, real egress proxy, no mocks.
 #
-# Requirements: docker running, and `agentbox` on PATH (override with
-# AGENTBOX=/path/to/agentbox). The stub runtime image is built automatically.
+# Requirements: docker running, and `andbo` on PATH (override with
+# ANDBO=/path/to/andbo). The stub runtime image is built automatically.
 
 set -uo pipefail
 
-# --- resolve agentbox + repo root, build the stub image if missing -----------
-AGENTBOX_BIN="${AGENTBOX:-agentbox}"
-agentbox() { command "$AGENTBOX_BIN" "$@"; } # so the prompt always shows "agentbox"
+# --- resolve andbo + repo root, build the stub image if missing -----------
+ANDBO_BIN="${ANDBO:-andbo}"
+andbo() { command "$ANDBO_BIN" "$@"; } # so the prompt always shows "andbo"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if ! command -v "$AGENTBOX_BIN" >/dev/null 2>&1 && [ ! -x "$AGENTBOX_BIN" ]; then
-	echo "error: 'agentbox' not found on PATH (set AGENTBOX=/path/to/agentbox)" >&2
+if ! command -v "$ANDBO_BIN" >/dev/null 2>&1 && [ ! -x "$ANDBO_BIN" ]; then
+	echo "error: 'andbo' not found on PATH (set ANDBO=/path/to/andbo)" >&2
 	exit 1
 fi
 if ! docker info >/dev/null 2>&1; then
 	echo "error: Docker is not running" >&2
 	exit 1
 fi
-if ! docker image inspect agentbox/stub-agent:latest >/dev/null 2>&1; then
-	echo "building agentbox/stub-agent:latest (one-time)…" >&2
-	docker build -q -t agentbox/stub-agent:latest \
+if ! docker image inspect andbo/stub-agent:latest >/dev/null 2>&1; then
+	echo "building andbo/stub-agent:latest (one-time)…" >&2
+	docker build -q -t andbo/stub-agent:latest \
 		-f "$REPO_ROOT/examples/agents/stub.Dockerfile" "$REPO_ROOT/examples/agents" >/dev/null
 fi
 
@@ -51,10 +51,10 @@ pe() {                                                                # type + r
 # --- the demo ----------------------------------------------------------------
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
-cat > agentbox.yaml <<'YAML'
+cat > andbo.yaml <<'YAML'
 runtime:
   isolation: container
-  image: agentbox/stub-agent:latest
+  image: andbo/stub-agent:latest
 network:
   mode: allowlist          # ENFORCED, not advisory
   allow:
@@ -62,21 +62,21 @@ network:
 YAML
 
 clear
-pc "AgentBox: your agent reaches exactly what you allow — and nothing else."
+pc "Andbo: your agent reaches exactly what you allow — and nothing else."
 pc "The policy allows one domain:"
-pe "cat agentbox.yaml"
+pe "cat andbo.yaml"
 
 pc "github.com is allowed — the sandbox reaches it:"
-pe "agentbox exec 'git ls-remote https://github.com/git/git.git HEAD'"
+pe "andbo exec 'git ls-remote https://github.com/git/git.git HEAD'"
 
 pc "Anything else: DNS is dead — no resolution side channel to exfil through:"
-pe "agentbox exec 'getent hosts gitlab.com || echo \"  → DNS blocked (exit \$?)\"'" || true
+pe "andbo exec 'getent hosts gitlab.com || echo \"  → DNS blocked (exit \$?)\"'" || true
 
 pc "And the connection itself fails closed at the proxy:"
-pe "agentbox exec 'git ls-remote https://gitlab.com/gitlab-org/gitlab.git HEAD'" || true
+pe "andbo exec 'git ls-remote https://gitlab.com/gitlab-org/gitlab.git HEAD'" || true
 
 pc "Every attempt is in the audit trail:"
-pe "agentbox session show latest | grep -E 'exit 128|BLOCKED egress'"
+pe "andbo session show latest | grep -E 'exit 128|BLOCKED egress'"
 
-printf '\n%sEnforced egress: allowlist your model API, deny the rest. github.com/qosikz/agentbox%s\n' "$DIM" "$RST"
+printf '\n%sEnforced egress: allowlist your model API, deny the rest. github.com/qosikz/andbo%s\n' "$DIM" "$RST"
 sleep 2

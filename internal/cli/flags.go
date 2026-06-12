@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// runOptions holds parsed flags/positionals for `agentbox run`.
+// runOptions holds parsed flags/positionals for `andbo run`.
 type runOptions struct {
 	task              string
 	repo              string
@@ -32,7 +32,7 @@ var runValueFlags = map[string]bool{
 
 // parseRunFlags parses `run` arguments: a positional task or repo plus flags.
 func parseRunFlags(args []string) (runOptions, error) {
-	o := runOptions{policy: "agentbox.yaml"}
+	o := runOptions{policy: "andbo.yaml"}
 	var positionals []string
 
 	for i := 0; i < len(args); i++ {

@@ -1,4 +1,4 @@
-# AgentBox Session Report
+# Andbo Session Report
 
 Session: `20260611-120102-a1b2c3`
 
@@ -8,7 +8,7 @@ Session: `20260611-120102-a1b2c3`
 - Agent: `custom`
 - Runtime: `docker`
 - Network: `deny`
-- Policy: `agentbox.yaml`
+- Policy: `andbo.yaml`
 - Status: `success`
 
 ## Task

@@ -12,7 +12,7 @@ import (
 func writeExecPolicy(t *testing.T, dir string, extra string) {
 	t.Helper()
 	pol := "tests:\n  commands: []\n" + extra
-	if err := os.WriteFile(filepath.Join(dir, "agentbox.yaml"), []byte(pol), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "andbo.yaml"), []byte(pol), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -73,7 +73,7 @@ func TestExecRejectsCommitFlags(t *testing.T) {
 	chdir(t, dir)
 	r := NewRoot("test", "none", "now")
 	err := r.cmdExec(context.Background(), []string{"--commit", "echo hi"})
-	if err == nil || !strings.Contains(err.Error(), "agentbox run") {
+	if err == nil || !strings.Contains(err.Error(), "andbo run") {
 		t.Errorf("exec --commit should be rejected with a pointer to run, got: %v", err)
 	}
 }

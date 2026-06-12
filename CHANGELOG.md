@@ -1,13 +1,23 @@
 # Changelog
 
-All notable changes to AgentBox are documented here.
+All notable changes to Andbo are documented here.
 
 ## Unreleased
 
+### Renamed
+- **The project is now Andbo (formerly AgentBox).** All commands, the module
+  path (`github.com/qosikz/andbo`), the binary (`andbo`), the config file
+  (`andbo.yaml`), the state directory (`.andbo/`), environment variables
+  (`ANDBO_*`), the published image (`ghcr.io/qosikz/andbo/runtime`), and the
+  agent skill (`andbo-sandbox`) were renamed. Earlier changelog entries below
+  are written with the new name for consistency; they shipped under the old
+  name. The GitHub repository and published artifacts move to the new name at
+  the next release.
+
 ### Changed
 - The fallback commit identity used when a repo has no configured git identity
-  (e.g. fresh CI runners) is now `QOSI AgentBox <agentbox@qosi.kz>` instead of
-  `AgentBox <agentbox@localhost>` — an intentional, branded identity for
+  (e.g. fresh CI runners) is now `QOSI Andbo <andbo@qosi.kz>` instead of
+  `Andbo <andbo@localhost>` — an intentional, branded identity for
   agent-made commits.
 
 ## v0.5.0 — 2026-06-13 (configurable egress ports + adoption polish)
@@ -21,7 +31,7 @@ All notable changes to AgentBox are documented here.
   tunnels are protocol-agnostic, permitting a non-80/443 port widens egress to
   arbitrary TCP toward your allowlisted host:port — README/SECURITY now say so.
   Ports validated 1–65535 at the config layer and in the proxy. Security-reviewed
-  (verdict: ship). *Originally prototyped by a Hermes agent dogfooding AgentBox.*
+  (verdict: ship). *Originally prototyped by a Hermes agent dogfooding Andbo.*
 - **Recipe guides** in [`recipes/`](recipes/): safe Claude Code, containerized
   Codex, MCP server quarantine, CI dry-run for untrusted PRs.
 - Project **banner** + trust **badges** (release, CI, Go version, license,
@@ -36,7 +46,7 @@ All notable changes to AgentBox are documented here.
 
 ### Changed
 - README first-run story rewritten: the Quickstart now leads with a real
-  sandboxed `agentbox exec` run (non-root, network-deny, diff, audit) against the
+  sandboxed `andbo exec` run (non-root, network-deny, diff, audit) against the
   auto-pulled default image; a new "Two ways to start" separates ready-now
   sandbox mechanics from the optional real-agent step. "How it works" moved below
   Quickstart and the exfiltration GIF is the single hero — leaner top.
@@ -50,11 +60,11 @@ All notable changes to AgentBox are documented here.
 
 ## v0.4.1 — 2026-06-12 (zero-friction first run + supply-chain trust)
 
-Adoption and trust packaging: a real `agentbox run` now works with no setup, and
+Adoption and trust packaging: a real `andbo run` now works with no setup, and
 every release is verifiable.
 
 ### Added
-- **Published default runtime image** `ghcr.io/qosikz/agentbox/runtime:latest`
+- **Published default runtime image** `ghcr.io/qosikz/andbo/runtime:latest`
   (multi-arch linux/amd64+arm64, non-root, minimal Debian + `git` +
   `ca-certificates`). The default policy points at it and Docker/Podman pull it
   automatically — no image to build before the first container run.
@@ -68,8 +78,8 @@ every release is verifiable.
 - `publish-image.yml` workflow; a "Verifying releases" guide in the README.
 
 ### Changed
-- Default `runtime.image` repointed from the unpublished `agentbox/default:latest`
-  to the published GHCR image, across `agentbox init`, examples, and docs.
+- Default `runtime.image` repointed from the unpublished `andbo/default:latest`
+  to the published GHCR image, across `andbo init`, examples, and docs.
 - All GitHub Actions are pinned to commit SHAs (release, CI, and the composite
   action) — supply-chain hardening against tag-mutation. Release/publish jobs run
   with least-privilege `permissions` and OIDC (`id-token`/`attestations: write`).
@@ -95,7 +105,7 @@ provider's API domains and the agent can reach those and nothing else.
      private/loopback/link-local ranges refused (anti-SSRF backstop).
 - `internal/netproxy` + `cmd/netproxy`: a stdlib-only filtering forward proxy
   (HTTP CONNECT + absolute-form HTTP) with structured ALLOW/DENY audit lines.
-  Static linux builds (amd64/arm64) are **embedded into the agentbox binary**
+  Static linux builds (amd64/arm64) are **embedded into the andbo binary**
   by `make build`/`make release` and run in the sidecar from the user's own
   runtime image — no extra image or binary to install.
 - Every proxy ALLOW/DENY is harvested into the session: denials become policy
@@ -103,9 +113,9 @@ provider's API domains and the agent can reach those and nothing else.
 - The proxy sidecar carries the same hardening as the agent container:
   non-root 10001, `--cap-drop ALL`, no-new-privileges, `--rm`, and mounts ONLY
   the proxy binary read-only — never the workspace.
-- `agentbox doctor` reports `egress-proxy` embed status (allowlist
+- `andbo doctor` reports `egress-proxy` embed status (allowlist
   enforceability) per architecture.
-- `examples/agentbox.codex.yaml` now uses `network: allowlist` with
+- `examples/andbo.codex.yaml` now uses `network: allowlist` with
   `api.openai.com` — **no `--yes-unsafe` required** for a real agent run.
 
 ### Changed
@@ -145,15 +155,15 @@ provider's API domains and the agent can reach those and nothing else.
 ## v0.3.2 — 2026-06-12 (public-home prep)
 
 ### Changed
-- **Module path renamed** `github.com/qosi/agentbox` → `github.com/qosikz/agentbox`
+- **Module path renamed** `github.com/qosi/andbo` → `github.com/qosikz/andbo`
   to match the public home (the QOSI organization at github.com/qosikz). This
-  updates `go.mod`, every import, the `ghcr.io/.../agentbox` test fixtures, and
+  updates `go.mod`, every import, the `ghcr.io/.../andbo` test fixtures, and
   the README install/clone/`go install` URLs, so `go install
-  github.com/qosikz/agentbox/cmd/agentbox@latest` resolves once the repo is
+  github.com/qosikz/andbo/cmd/andbo@latest` resolves once the repo is
   public. No runtime behavior change.
 
 ### Documentation
-- README: added an "Add AgentBox to your agent harness" quickstart near the top
+- README: added an "Add Andbo to your agent harness" quickstart near the top
   (copy-paste `skill install` + `exec` + the MCP one-liner) so harness users can
   wire in the sandbox in ~30 seconds. Status bumped to v0.3.1.
 
@@ -161,27 +171,27 @@ provider's API domains and the agent can reach those and nothing else.
 
 ### Removed
 - The `aider` adapter. Aider's upstream activity has stalled (last release
-  2025-08); AgentBox now focuses on actively-maintained harnesses and the
+  2025-08); Andbo now focuses on actively-maintained harnesses and the
   `custom` adapter, which runs any CLI agent. `agent: aider` is no longer a
   valid adapter name — use `custom` with `agent.custom.command: aider` if you
   still need it.
 
 ### Changed
 - Documentation and positioning lead with **harness integration** — driving
-  AgentBox from Claude Code, OpenClaw, Hermes Agent, or any MCP/skill-capable
+  Andbo from Claude Code, OpenClaw, Hermes Agent, or any MCP/skill-capable
   harness (via `exec` / `mcp serve` / `skill`) — and with the `custom` adapter
-  as the bring-your-own-agent path. `agentbox doctor` now probes
+  as the bring-your-own-agent path. `andbo doctor` now probes
   claude/codex/gemini/goose/opencode instead of aider.
 
 ## v0.3.0 — 2026-06-11 (containerized agents)
 
 Run a coding agent fully inside the sandbox: bake its CLI into a runtime image
-and let AgentBox run it under policy, with credentials injected at runtime and
+and let Andbo run it under policy, with credentials injected at runtime and
 redacted from logs.
 
 ### Added
 - **Baked-in agent support.** The agent CLI can now live only in the runtime
-  image. AgentBox preflights the agent by **probing the image** (a hardened,
+  image. Andbo preflights the agent by **probing the image** (a hardened,
   no-network, self-removing throwaway container) instead of the host PATH, so a
   containerized agent you have never installed locally runs correctly. A missing
   agent yields an actionable, image-aware error before anything executes.
@@ -194,7 +204,7 @@ redacted from logs.
     verified zero-cost path). Uses `CODEX_API_KEY`, matching the codex adapter.
   - `README.md` — the baked-in-agent model, runtime secret injection, and the
     honest network limitation.
-- Example policies `examples/agentbox.stub.yaml` and `examples/agentbox.codex.yaml`.
+- Example policies `examples/andbo.stub.yaml` and `examples/andbo.codex.yaml`.
 - `runtime.Runner` gains `ProbeBinary(ctx, image, bin)` (implemented for
   docker/podman, local, and dry-run runners).
 
@@ -219,20 +229,20 @@ redacted from logs.
 
 ## v0.2.0 — 2026-06-11 (harness integration)
 
-AgentBox now works in BOTH directions: it sandboxes agents, and agent
+Andbo now works in BOTH directions: it sandboxes agents, and agent
 harnesses use it as their safety sandbox.
 
 ### Added
-- `agentbox exec "<command>"` — run any command in an isolated, policy-
+- `andbo exec "<command>"` — run any command in an isolated, policy-
   controlled workspace with no agent adapter: the calling harness IS the
   agent. The sandboxed command's exit code passes through; `--json` returns
   exit_code, redacted output, changed files, and the session path.
-- `agentbox mcp serve` — a stdio MCP server (protocol 2025-11-25, with
+- `andbo mcp serve` — a stdio MCP server (protocol 2025-11-25, with
   fallbacks) exposing `sandbox_exec`, `sandbox_run`, `scan_mcp`,
   `session_list`, and `session_show` to any MCP-capable harness (Claude Code,
   OpenClaw, Codex CLI, Gemini CLI, Goose, OpenCode). Unsafe modes are not
   reachable through MCP tools.
-- `agentbox skill install` — installs a cross-harness SKILL.md
+- `andbo skill install` — installs a cross-harness SKILL.md
   (agentskills.io-style) teaching the harness when to use the sandbox.
   Targets: claude-project, claude-user, openclaw, hermes, agents
   (~/.agents/skills), or `--dir`.
@@ -251,7 +261,7 @@ harnesses use it as their safety sandbox.
 
 ### Verified
 - End-to-end run with a real coding agent: Claude Code fixed a failing Go
-  test under AgentBox — tests re-run green, diff captured, branch committed
+  test under Andbo — tests re-run green, diff captured, branch committed
   and propagated, session recorded, workspace cleaned.
 
 ## v0.1.0 — 2026-06-11 (production preview)
@@ -279,7 +289,7 @@ harnesses use it as their safety sandbox.
 
 ### Production hardening
 - Podman support: `runtime.engine: podman` in the policy or the new
-  `agentbox run --engine docker|podman` flag.
+  `andbo run --engine docker|podman` flag.
 - Container hardening: containers run as a non-root user with `--cap-drop ALL`
   and `--security-opt no-new-privileges`; never privileged, never the Docker socket.
 - Environment hygiene: host `PATH`/`HOME` are never forwarded into containers;

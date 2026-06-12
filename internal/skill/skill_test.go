@@ -35,9 +35,9 @@ func TestContent(t *testing.T) {
 		name string
 		want string
 	}{
-		{"frontmatter name", "name: agentbox-sandbox"},
+		{"frontmatter name", "name: andbo-sandbox"},
 		{"frontmatter version", "version: 0.2.0"},
-		{"openclaw bins requirement", `"bins": ["agentbox"]`},
+		{"openclaw bins requirement", `"bins": ["andbo"]`},
 		{"hermes metadata", `"hermes": {"category": "devops"`},
 	}
 	for _, tt := range tests {
@@ -52,13 +52,13 @@ func TestContent(t *testing.T) {
 		name string
 		want string
 	}{
-		{"exec command", "agentbox exec"},
-		{"mcp scan command", "agentbox mcp scan"},
-		{"session audit", "agentbox session list"},
+		{"exec command", "andbo exec"},
+		{"mcp scan command", "andbo mcp scan"},
+		{"session audit", "andbo session list"},
 		{"json result fields", "exit_code"},
 		{"unsafe flag warning", "NEVER pass `--unsafe`"},
 		{"local runtime warning", "--runtime local"},
-		{"doctor hint", "agentbox doctor"},
+		{"doctor hint", "andbo doctor"},
 	}
 	body := string(c)
 	for _, tt := range bodyChecks {

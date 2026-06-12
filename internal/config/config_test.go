@@ -40,7 +40,7 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 
 func TestLoadDecodesOverDefaults(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "agentbox.yaml")
+	path := filepath.Join(dir, "andbo.yaml")
 	// Omit cleanup and filesystem entirely: defaults must be preserved.
 	yaml := "runtime:\n  isolation: container\n  engine: podman\n  image: custom:1\nnetwork:\n  mode: open\n"
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
@@ -66,7 +66,7 @@ func TestLoadDecodesOverDefaults(t *testing.T) {
 
 func TestLoadRejectsUnknownKeys(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "agentbox.yaml")
+	path := filepath.Join(dir, "andbo.yaml")
 	if err := os.WriteFile(path, []byte("runtime:\n  bogus: true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestLoadRejectsUnknownKeys(t *testing.T) {
 
 func TestLoadRejectsInvalidYAML(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "agentbox.yaml")
+	path := filepath.Join(dir, "andbo.yaml")
 	if err := os.WriteFile(path, []byte("runtime: [unterminated\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -85,14 +85,14 @@ func TestLoadRejectsInvalidYAML(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for malformed YAML")
 	}
-	if !strings.Contains(err.Error(), "agentbox policy check") {
+	if !strings.Contains(err.Error(), "andbo policy check") {
 		t.Errorf("error should be actionable, got: %v", err)
 	}
 }
 
 func TestWriteDefaultPolicyRefusesOverwrite(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "agentbox.yaml")
+	path := filepath.Join(dir, "andbo.yaml")
 	if err := WriteDefaultPolicy(path); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestCheckValidDefaultPolicyOK(t *testing.T) {
 
 // The shipped example policies must parse under the strict loader and validate.
 func TestShippedExamplesAreValid(t *testing.T) {
-	for _, name := range []string{"agentbox.yaml", "agentbox.strict.yaml"} {
+	for _, name := range []string{"andbo.yaml", "andbo.strict.yaml"} {
 		path := filepath.Join("..", "..", "examples", name)
 		if _, err := os.Stat(path); err != nil {
 			t.Skipf("example %s not present: %v", name, err)

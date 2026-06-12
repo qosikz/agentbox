@@ -1,7 +1,7 @@
-APP := agentbox
+APP := andbo
 PKG := ./...
 
-# Version metadata embedded into the binary (see cmd/agentbox/main.go).
+# Version metadata embedded into the binary (see cmd/andbo/main.go).
 # Falls back to "dev" when git metadata is unavailable (e.g. source tarballs).
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -14,7 +14,7 @@ PLATFORMS := darwin/arm64 darwin/amd64 linux/arm64 linux/amd64
 
 # Embedded egress-proxy artifacts (linux-only: containers are linux). Built by
 # `make proxy` BEFORE the main binary so go:embed picks them up; this is what
-# makes network.mode=allowlist enforceable from a single agentbox binary.
+# makes network.mode=allowlist enforceable from a single andbo binary.
 PROXY_DIR := internal/netproxy/embedded
 
 .PHONY: fmt test build lint proxy release clean
@@ -30,7 +30,7 @@ proxy:
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o $(PROXY_DIR)/netproxy_linux_arm64 ./cmd/netproxy
 
 build: proxy
-	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/$(APP) ./cmd/agentbox
+	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/$(APP) ./cmd/andbo
 
 lint:
 	go vet $(PKG)
@@ -43,7 +43,7 @@ release: proxy
 	$(foreach platform,$(PLATFORMS),\
 		CGO_ENABLED=0 GOOS=$(word 1,$(subst /, ,$(platform))) GOARCH=$(word 2,$(subst /, ,$(platform))) \
 		go build -trimpath -ldflags "$(LDFLAGS)" \
-		-o dist/$(APP)_$(word 1,$(subst /, ,$(platform)))_$(word 2,$(subst /, ,$(platform))) ./cmd/agentbox &&) true
+		-o dist/$(APP)_$(word 1,$(subst /, ,$(platform)))_$(word 2,$(subst /, ,$(platform))) ./cmd/andbo &&) true
 	cd dist && shasum -a 256 $(APP)_* > checksums.txt
 
 clean:

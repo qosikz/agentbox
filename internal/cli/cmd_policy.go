@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/qosikz/agentbox/internal/config"
-	"github.com/qosikz/agentbox/internal/policy"
+	"github.com/qosikz/andbo/internal/config"
+	"github.com/qosikz/andbo/internal/policy"
 )
 
 func (r *Root) cmdPolicy(args []string) error {
 	if len(args) == 0 || args[0] != "check" {
-		return codedf(ExitGeneral, "usage: agentbox policy check [--policy FILE] [--json]")
+		return codedf(ExitGeneral, "usage: andbo policy check [--policy FILE] [--json]")
 	}
 	rest := args[1:]
-	path := flagValue(rest, "--policy", "agentbox.yaml")
+	path := flagValue(rest, "--policy", "andbo.yaml")
 	jsonOut := hasFlag(rest, "--json")
 
 	cfg, err := config.LoadPolicy(path)

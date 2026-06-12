@@ -6,7 +6,7 @@ body:
     id: problem
     attributes:
       label: The problem / use case
-      description: What are you trying to do, and where does AgentBox get in the way?
+      description: What are you trying to do, and where does Andbo get in the way?
     validations:
       required: true
   - type: textarea
@@ -22,4 +22,4 @@ body:
     attributes:
       label: Fit
       options:
-        - label: This keeps AgentBox CLI-first and does not weaken a secure default.
+        - label: This keeps Andbo CLI-first and does not weaken a secure default.

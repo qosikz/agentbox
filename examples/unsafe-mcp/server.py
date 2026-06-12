@@ -1,4 +1,4 @@
-"""Example UNSAFE MCP server fixture for `agentbox mcp scan`.
+"""Example UNSAFE MCP server fixture for `andbo mcp scan`.
 
 This server intentionally exposes dangerous capabilities so MCP Guard has a
 realistic target to flag. Do not use it as a template.

@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/qosikz/agentbox/internal/config"
+	"github.com/qosikz/andbo/internal/config"
 )
 
 // mandatoryDenies are always merged into filesystem.deny. The home-directory
@@ -269,7 +269,7 @@ func (e EffectivePolicy) EnforcedNetwork() string {
 	return e.Network.Mode
 }
 
-// Human renders the effective policy for `agentbox policy check`.
+// Human renders the effective policy for `andbo policy check`.
 func (e EffectivePolicy) Human() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Effective policy\n")

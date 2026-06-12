@@ -1,5 +1,5 @@
-// Package adapters translates an AgentBox task + policy into an agent-specific
-// command. AgentBox is not itself an agent; adapters are the seam where real
+// Package adapters translates an Andbo task + policy into an agent-specific
+// command. Andbo is not itself an agent; adapters are the seam where real
 // coding agents (custom, claude, codex, ...) plug in.
 //
 // This file is the FROZEN CONTRACT for the package. Implementations
@@ -32,7 +32,7 @@ type Result struct {
 	Summary string
 }
 
-// Adapter adapts a coding agent to AgentBox's invocation model.
+// Adapter adapts a coding agent to Andbo's invocation model.
 type Adapter interface {
 	// Name is the adapter identifier (e.g. "custom", "claude").
 	Name() string

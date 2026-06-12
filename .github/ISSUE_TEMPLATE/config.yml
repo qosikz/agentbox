@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 🔒 Report a security vulnerability
-    url: https://github.com/qosikz/agentbox/security/advisories/new
+    url: https://github.com/qosikz/andbo/security/advisories/new
     about: Please report vulnerabilities privately — not as a public issue. See SECURITY.md.
   - name: 💬 Questions, ideas & help (Discussions)
-    url: https://github.com/qosikz/agentbox/discussions
+    url: https://github.com/qosikz/andbo/discussions
     about: Ask how something works, share an idea, or get help.

@@ -1,20 +1,20 @@
-# Example: bake the OpenAI Codex CLI into an AgentBox runtime image.
+# Example: bake the OpenAI Codex CLI into an Andbo runtime image.
 #
 # An ILLUSTRATIVE example of the "baked-in agent" model: the AGENT runs inside
-# the container, and AgentBox is the sandbox around it. (The verified zero-cost
+# the container, and Andbo is the sandbox around it. (The verified zero-cost
 # path is stub.Dockerfile; Codex auth/sandbox specifics are version-dependent —
-# see ../agentbox.codex.yaml and ./README.md.) The API key is NEVER baked into
+# see ../andbo.codex.yaml and ./README.md.) The API key is NEVER baked into
 # the image — image layers are immutable and would leak the secret via
 # `docker history`, `docker save`, or any registry push. The key is injected at
 # RUNTIME via secrets.allow (CODEX_API_KEY) and redacted from logs.
 #
 # Build (context is this directory):
 #
-#   docker build -t agentbox/codex:latest -f examples/agents/codex.Dockerfile examples/agents
+#   docker build -t andbo/codex:latest -f examples/agents/codex.Dockerfile examples/agents
 #
-# Then point your policy at it (see ../agentbox.codex.yaml):
+# Then point your policy at it (see ../andbo.codex.yaml):
 #
-#   runtime.image: agentbox/codex:latest
+#   runtime.image: andbo/codex:latest
 #   agent.default: codex
 FROM node:20-bookworm-slim
 
@@ -28,6 +28,6 @@ RUN npm install -g @openai/codex \
 	&& useradd -m -u 10001 agent
 
 # NOTE: no ENV / no ARG for the API key — credentials are injected at runtime
-# by AgentBox, never stored in a layer.
+# by Andbo, never stored in a layer.
 USER agent
 WORKDIR /workspace

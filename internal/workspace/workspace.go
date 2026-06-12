@@ -7,15 +7,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/qosikz/agentbox/internal/policy"
+	"github.com/qosikz/andbo/internal/policy"
 )
 
 // skipDirs are repository-internal directories never copied into a workspace:
-// .git carries history and remotes, .agentbox carries run state and would let
+// .git carries history and remotes, .andbo carries run state and would let
 // an agent observe or tamper with its own sandbox.
 var skipDirs = map[string]bool{
-	".git":      true,
-	".agentbox": true,
+	".git":   true,
+	".andbo": true,
 }
 
 // BuildPlan resolves the filesystem layout for a run from an EffectivePolicy.
@@ -76,7 +76,7 @@ func BuildPlan(repoRoot string, ep policy.EffectivePolicy) (Plan, error) {
 
 // Prepare materializes an isolated copy of the repository at dest, honoring the
 // plan's deny rules. It recursively copies plan.RepoRoot into dest, skipping the
-// .git and .agentbox directories and any path matching a denied repo-relative
+// .git and .andbo directories and any path matching a denied repo-relative
 // pattern. File mode bits are preserved.
 //
 // This realizes the MVP "enforce by workspace copy" model: denied sensitive

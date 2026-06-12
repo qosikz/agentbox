@@ -11,7 +11,7 @@ import (
 //	gemini --approval-mode auto_edit -p "<task>"
 //
 // auto_edit auto-approves only edit tools — the same conservative posture as
-// the claude adapter's acceptEdits. Inside a fully isolated AgentBox
+// the claude adapter's acceptEdits. Inside a fully isolated Andbo
 // container, users may pass --approval-mode yolo via ExtraArgs for full
 // auto-approval.
 //

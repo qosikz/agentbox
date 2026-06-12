@@ -1,6 +1,6 @@
 name: Publish runtime image
 
-# Publishes the default runtime image so `agentbox run` works on first use
+# Publishes the default runtime image so `andbo run` works on first use
 # without anyone having to build an image. Multi-arch, signed, and attested.
 on:
   push:
@@ -11,7 +11,7 @@ on:
 permissions: {}
 
 env:
-  IMAGE: ghcr.io/qosikz/agentbox/runtime
+  IMAGE: ghcr.io/qosikz/andbo/runtime
 
 jobs:
   publish:

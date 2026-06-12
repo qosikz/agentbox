@@ -1,4 +1,4 @@
-# AgentBox recipes
+# Andbo recipes
 
 Short, copy-pasteable guides for common jobs. Each is built from features in the
 [main README](../README.md) — no new concepts.
@@ -12,4 +12,4 @@ Short, copy-pasteable guides for common jobs. Each is built from features in the
 
 For an egress allowlist scoped to your model API (the v0.4.0 headline), see the
 [main README](../README.md#recipes) and
-[`examples/agentbox.codex.yaml`](../examples/agentbox.codex.yaml).
+[`examples/andbo.codex.yaml`](../examples/andbo.codex.yaml).

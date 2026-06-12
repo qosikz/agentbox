@@ -1,11 +1,11 @@
 ---
-name: agentbox-sandbox
-description: Run commands, tests, or untrusted code in an isolated AgentBox sandbox. Use before executing risky commands, to validate generated code, or to vet MCP servers.
+name: andbo-sandbox
+description: Run commands, tests, or untrusted code in an isolated Andbo sandbox. Use before executing risky commands, to validate generated code, or to vet MCP servers.
 version: 0.2.0
-metadata: {"openclaw": {"requires": {"bins": ["agentbox"]}}, "hermes": {"category": "devops", "tags": ["sandbox", "security", "testing"]}}
+metadata: {"openclaw": {"requires": {"bins": ["andbo"]}}, "hermes": {"category": "devops", "tags": ["sandbox", "security", "testing"]}}
 ---
 
-# AgentBox Sandbox
+# Andbo Sandbox
 
 Run anything risky inside an isolated, policy-controlled container instead of the host.
 
@@ -20,12 +20,12 @@ Run anything risky inside an isolated, policy-controlled container instead of th
 ## Core commands
 
 ```
-agentbox exec "<command>" --json        # sandboxed command; exit code passes through; changed files + diff captured
-agentbox exec --dry-run "<command>"     # preview the sandbox (mounts, policy, image) without executing
-agentbox run "<task>" --agent <name>    # drive a coding agent in the sandbox: custom, claude, codex, gemini, goose, opencode
-agentbox mcp scan <path> --json         # static-scan an MCP server; exit 2 = unsafe
-agentbox session list                   # audit recorded runs
-agentbox session show latest            # inspect the most recent run; artifacts in .agentbox/sessions/<id>/
+andbo exec "<command>" --json        # sandboxed command; exit code passes through; changed files + diff captured
+andbo exec --dry-run "<command>"     # preview the sandbox (mounts, policy, image) without executing
+andbo run "<task>" --agent <name>    # drive a coding agent in the sandbox: custom, claude, codex, gemini, goose, opencode
+andbo mcp scan <path> --json         # static-scan an MCP server; exit 2 = unsafe
+andbo session list                   # audit recorded runs
+andbo session show latest            # inspect the most recent run; artifacts in .andbo/sessions/<id>/
 ```
 
 Prefer `--json` when you will parse the result.
@@ -36,10 +36,10 @@ Prefer `--json` when you will parse the result.
 
 ## Safety rules
 
-- Runs are policy-governed by `agentbox.yaml`: network denied by default, secrets and `.env` excluded.
+- Runs are policy-governed by `andbo.yaml`: network denied by default, secrets and `.env` excluded.
 - NEVER pass `--unsafe`, `--yes-unsafe`, `--runtime local`, `--allow-host-home`, or `--allow-docker-socket` unless the human explicitly asked.
-- If `agentbox` or Docker is missing, say so instead of bypassing the sandbox (`agentbox doctor` diagnoses).
+- If `andbo` or Docker is missing, say so instead of bypassing the sandbox (`andbo doctor` diagnoses).
 
 ## Requirements
 
-`agentbox` binary on PATH; Docker (or Podman) for container isolation; run `agentbox init` once per project.
+`andbo` binary on PATH; Docker (or Podman) for container isolation; run `andbo init` once per project.

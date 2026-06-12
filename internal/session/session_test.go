@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qosikz/agentbox/internal/secrets"
+	"github.com/qosikz/andbo/internal/secrets"
 )
 
 func newRedactor(t *testing.T, values map[string]string) *secrets.Redactor {

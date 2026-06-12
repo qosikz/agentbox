@@ -1,9 +1,9 @@
-// Package skill ships the cross-harness "agentbox-sandbox" agent skill: a
+// Package skill ships the cross-harness "andbo-sandbox" agent skill: a
 // single SKILL.md that teaches any agent harness (Claude Code, OpenClaw,
 // Hermes Agent, and anything honoring the agentskills.io standard) to use
-// the agentbox CLI as its safety sandbox.
+// the andbo CLI as its safety sandbox.
 //
-// The skill content is embedded at build time so the agentbox binary can
+// The skill content is embedded at build time so the andbo binary can
 // install it offline into the well-known skill directories of each harness.
 package skill
 
@@ -17,8 +17,8 @@ import (
 )
 
 // Name is the canonical skill directory name used by every harness:
-// <skills-dir>/agentbox-sandbox/SKILL.md.
-const Name = "agentbox-sandbox"
+// <skills-dir>/andbo-sandbox/SKILL.md.
+const Name = "andbo-sandbox"
 
 //go:embed content/SKILL.md
 var content []byte
@@ -29,7 +29,7 @@ func Content() []byte {
 }
 
 // Target is a harness-specific skill installation directory. Dir is the
-// skills root: the agentbox-sandbox/ subdirectory is created inside it.
+// skills root: the andbo-sandbox/ subdirectory is created inside it.
 // Dir may contain "~" when constructed by callers; Targets itself returns
 // paths already expanded with the provided home directory.
 type Target struct {
@@ -71,7 +71,7 @@ func Targets(home string) []Target {
 	}
 }
 
-// Install writes the embedded skill to <dir>/agentbox-sandbox/SKILL.md and
+// Install writes the embedded skill to <dir>/andbo-sandbox/SKILL.md and
 // returns the written path. It refuses to overwrite an existing SKILL.md
 // unless force is true, so a locally customized skill is never clobbered
 // silently.

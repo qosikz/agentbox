@@ -1,20 +1,20 @@
-# Example AgentBox workflow.
+# Example Andbo workflow.
 #
-# Copy this to .github/workflows/agentbox.yml in your repository. It runs
-# AgentBox in DRY-RUN by default and uploads the session as an artifact, so it
+# Copy this to .github/workflows/andbo.yml in your repository. It runs
+# Andbo in DRY-RUN by default and uploads the session as an artifact, so it
 # is safe to enable on pull requests (including from forks) without exposing
 # secrets or write tokens.
 #
-# To let AgentBox open pull requests, set dry_run: "false" and open_pr: "true"
+# To let Andbo open pull requests, set dry_run: "false" and open_pr: "true"
 # on a trusted trigger (e.g. workflow_dispatch or a label on a non-fork PR), and
 # grant contents/pull-requests write only there.
-name: AgentBox
+name: Andbo
 
 on:
   workflow_dispatch:
     inputs:
       task:
-        description: "Task for AgentBox"
+        description: "Task for Andbo"
         required: true
         type: string
       dry_run:
@@ -32,16 +32,16 @@ permissions:
   issues: read
 
 jobs:
-  agentbox:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.labels.*.name, 'agentbox')
+  andbo:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.labels.*.name, 'andbo')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       # Uses the composite action shipped in this repository.
-      - uses: ./.github/actions/agentbox
+      - uses: ./.github/actions/andbo
         with:
           task: ${{ github.event.inputs.task || github.event.issue.title }}
-          policy: agentbox.yaml
+          policy: andbo.yaml
           dry_run: ${{ github.event.inputs.dry_run || 'true' }}
           open_pr: "false"

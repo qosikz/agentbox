@@ -1,5 +1,5 @@
-// Command netproxy is AgentBox's egress-enforcement proxy. It is cross-compiled
-// as a static linux binary, embedded into the agentbox CLI, and run in a
+// Command netproxy is Andbo's egress-enforcement proxy. It is cross-compiled
+// as a static linux binary, embedded into the andbo CLI, and run in a
 // sidecar container as the only path out of the sandbox network. It is not
 // meant to be invoked by users directly.
 package main
@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/qosikz/agentbox/internal/netproxy"
+	"github.com/qosikz/andbo/internal/netproxy"
 )
 
 func main() {
@@ -42,7 +42,7 @@ func main() {
 	}
 
 	// Audit lines go to stdout so the container runtime captures them and the
-	// AgentBox CLI can fold denials into the session's policy events.
+	// Andbo CLI can fold denials into the session's policy events.
 	logger := log.New(os.Stdout, "", log.LstdFlags|log.LUTC)
 	p, err := netproxy.New(netproxy.Config{
 		Listen: *listen,

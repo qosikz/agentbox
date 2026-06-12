@@ -7,19 +7,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qosikz/agentbox/internal/config"
-	"github.com/qosikz/agentbox/internal/policy"
-	"github.com/qosikz/agentbox/internal/runtime"
-	"github.com/qosikz/agentbox/internal/session"
-	"github.com/qosikz/agentbox/internal/workspace"
+	"github.com/qosikz/andbo/internal/config"
+	"github.com/qosikz/andbo/internal/policy"
+	"github.com/qosikz/andbo/internal/runtime"
+	"github.com/qosikz/andbo/internal/session"
+	"github.com/qosikz/andbo/internal/workspace"
 )
 
-// These tests map to AgentBox's required security acceptance criteria —
+// These tests map to Andbo's required security acceptance criteria —
 // the secure-by-default boundaries summarized in SECURITY.md.
 
 func defaultSpec(t *testing.T, ov policy.Overrides, o runOptions) runtime.RuntimeSpec {
 	t.Helper()
-	ep := policy.BuildEffectivePolicy(config.DefaultPolicy(), "agentbox.yaml", ov)
+	ep := policy.BuildEffectivePolicy(config.DefaultPolicy(), "andbo.yaml", ov)
 	plan := workspace.Plan{RepoRoot: "/repo", WritePaths: ep.Filesystem.Write}
 	return buildRuntimeSpec(ep, plan, "/repo", map[string]string{}, o)
 }
@@ -71,7 +71,7 @@ func TestDockerArgsSecureInvariants(t *testing.T) {
 // §8.8 unsafe network mode must require confirmation; non-interactive refuses.
 func TestUnsafeRealRunRefusedNonInteractive(t *testing.T) {
 	dir := t.TempDir()
-	if err := config.WriteDefaultPolicy(filepath.Join(dir, "agentbox.yaml")); err != nil {
+	if err := config.WriteDefaultPolicy(filepath.Join(dir, "andbo.yaml")); err != nil {
 		t.Fatal(err)
 	}
 	chdir(t, dir)
@@ -89,7 +89,7 @@ func TestRunRedactsSecretsInSavedLogs(t *testing.T) {
 	// Default secure policy but with no test commands, so the local run executes
 	// only the echo agent (running go test in a bare temp dir would fail).
 	const pol = "agent:\n  default: custom\n  custom:\n    command: echo\n    args:\n      - \"{{ task }}\"\ntests:\n  commands: []\n"
-	if err := os.WriteFile(filepath.Join(dir, "agentbox.yaml"), []byte(pol), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "andbo.yaml"), []byte(pol), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	chdir(t, dir)

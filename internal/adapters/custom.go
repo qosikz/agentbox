@@ -8,7 +8,7 @@ import (
 )
 
 // CustomAdapter invokes a user-defined CLI agent. The user supplies the
-// executable and its arguments; AgentBox substitutes the task into the args
+// executable and its arguments; Andbo substitutes the task into the args
 // via the "{{ task }}" / "{{task}}" placeholders.
 type CustomAdapter struct {
 	Command string

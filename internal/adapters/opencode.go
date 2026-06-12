@@ -10,9 +10,9 @@ import (
 //
 //	opencode run "<task>"
 //
-// "run" executes a single task and exits. Inside a fully isolated AgentBox
+// "run" executes a single task and exits. Inside a fully isolated Andbo
 // container, users may pass --dangerously-skip-permissions via ExtraArgs;
-// AgentBox's container isolation is then the enforcement boundary.
+// Andbo's container isolation is then the enforcement boundary.
 //
 // Auth note: opencode reads provider API keys from the environment
 // (ANTHROPIC_API_KEY, OPENAI_API_KEY, ...); allowlist the one for your

@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/qosikz/agentbox/internal/skill"
+	"github.com/qosikz/andbo/internal/skill"
 )
 
 func (r *Root) cmdSkill(args []string) error {
 	if len(args) == 0 {
-		return codedf(ExitGeneral, "usage: agentbox skill <install|show|targets> [--target NAME] [--dir PATH] [--force]")
+		return codedf(ExitGeneral, "usage: andbo skill <install|show|targets> [--target NAME] [--dir PATH] [--force]")
 	}
 	switch args[0] {
 	case "show":
@@ -33,7 +33,7 @@ func homeDir() string {
 }
 
 func skillTargets() error {
-	fmt.Println("Skill install targets (agentbox skill install --target NAME):")
+	fmt.Println("Skill install targets (andbo skill install --target NAME):")
 	fmt.Println()
 	for _, t := range skill.Targets(homeDir()) {
 		fmt.Printf("  %-15s %s\n", t.Name, t.Description)
@@ -56,7 +56,7 @@ func skillInstall(args []string) error {
 			}
 		}
 		if !found {
-			return codedf(ExitGeneral, "unknown skill target %q.\nRun 'agentbox skill targets' to see the options, or pass --dir <path>.", target)
+			return codedf(ExitGeneral, "unknown skill target %q.\nRun 'andbo skill targets' to see the options, or pass --dir <path>.", target)
 		}
 	}
 
@@ -66,12 +66,12 @@ func skillInstall(args []string) error {
 	}
 	ok(os.Stdout, "Installed skill: "+path)
 	fmt.Println()
-	fmt.Println("The harness will discover it automatically. To also expose AgentBox as an")
+	fmt.Println("The harness will discover it automatically. To also expose Andbo as an")
 	fmt.Println("MCP server (structured tools instead of shell calls):")
 	fmt.Println()
-	fmt.Println("  Claude Code:  claude mcp add agentbox -- agentbox mcp serve")
-	fmt.Println("  OpenClaw:     openclaw mcp add agentbox --command agentbox --arg mcp --arg serve")
-	fmt.Println("  Codex CLI:    codex mcp add agentbox -- agentbox mcp serve")
-	fmt.Println("  Gemini CLI:   gemini mcp add agentbox agentbox mcp serve")
+	fmt.Println("  Claude Code:  claude mcp add andbo -- andbo mcp serve")
+	fmt.Println("  OpenClaw:     openclaw mcp add andbo --command andbo --arg mcp --arg serve")
+	fmt.Println("  Codex CLI:    codex mcp add andbo -- andbo mcp serve")
+	fmt.Println("  Gemini CLI:   gemini mcp add andbo andbo mcp serve")
 	return nil
 }

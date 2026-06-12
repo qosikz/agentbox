@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/qosikz/agentbox/internal/netproxy"
+	"github.com/qosikz/andbo/internal/netproxy"
 )
 
 // dryRunRunner is a Runner that never executes anything. Instead it renders a
@@ -45,7 +45,7 @@ func (dryRunRunner) Run(ctx context.Context, spec RuntimeSpec, command CommandSp
 		// embedded proxy would fail closed at run time. Check this build.
 		enforce := "would be enforced via egress proxy"
 		if !netproxy.Embedded(runtime.GOARCH) {
-			enforce = "NOT enforceable in this build — proxy not embedded; see `agentbox doctor`"
+			enforce = "NOT enforceable in this build — proxy not embedded; see `andbo doctor`"
 		}
 		lines = append(lines, fmt.Sprintf("network: allowlist (%s: %s)", enforce, strings.Join(spec.AllowedDomains, ", ")))
 	} else {
