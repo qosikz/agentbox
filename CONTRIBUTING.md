@@ -72,6 +72,48 @@ make build       # cross-compiles the embedded proxy + the CLI
   behavior changes, and add a note under an `## Unreleased` heading in
   `CHANGELOG.md` for user-facing changes.
 
+## Common contributions
+
+### Add an agent adapter
+
+The `custom` adapter already runs any CLI agent; a built-in adapter just makes
+one turnkey. Model it on [`internal/adapters/codex.go`](internal/adapters/codex.go):
+
+1. Add `internal/adapters/<name>.go` implementing the `Adapter` interface
+   (`adapter.go`) — it builds the headless command and substitutes the task into
+   `{{ task }}`.
+2. Wire it up in [`registry.go`](internal/adapters/registry.go): add a
+   `case "<name>":` to `Get`, and the name to `SupportedNames()` (kept sorted).
+3. Add the agent to the known-agents list in
+   [`internal/cli/cmd_doctor.go`](internal/cli/cmd_doctor.go) so `doctor` reports it.
+4. Add a table-driven case to `internal/adapters/adapters_test.go` asserting the
+   built argv (no daemon needed).
+5. Appreciated: a worked `examples/agents/<name>.Dockerfile` + an
+   `examples/agentbox.<name>.yaml`, and a row in the README adapter list.
+
+The API key is injected at runtime from `secrets.allow` — **never bake it into an
+image**. Keep the network on `allowlist` with the provider's domain.
+
+### Write a security test
+
+The security acceptance tests live in
+[`internal/cli/security_test.go`](internal/cli/security_test.go). Add a case when
+you touch a boundary — e.g. `.env`/`~/.ssh` excluded by default, host env not
+forwarded to containers, unsafe modes gated behind `--yes-unsafe`, egress fails
+closed. Tests must be **hermetic** (no Docker daemon): assert on the resolved
+policy / planned runtime spec, not a live run.
+
+### Add or update a demo
+
+Demos under `demo/` are recordable shell scripts (see
+[`demo/README.md`](demo/README.md)). Iterate fast with
+`TYPE=0 HOLD=0 AGENTBOX="$PWD/bin/agentbox" demo/<name>-demo.sh`, then record with
+**asciinema 3.x** (`--headless --window-size 92x30`) and render with `agg`. One
+rule for security demos: **never echo a secret to live stdout** — `agentbox exec`
+redacts the *saved* session, not the live stream, so stage redaction proofs via
+`session show` / `logs.txt`, and verify the recording is clean
+(`grep -c '<your-fake-key>' demo/<name>.cast` → `0`).
+
 ## Pull requests
 
 1. Fork, and branch from `main`.

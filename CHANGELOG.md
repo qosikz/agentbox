@@ -5,7 +5,12 @@ All notable changes to AgentBox are documented here.
 ## Unreleased
 
 ### Added
-- Project **banner** (`assets/agentbox-banner.png`) leading the README.
+- Project **banner** (`assets/agentbox-banner.png`) leading the README, plus
+  trust **badges** (release, CI, Go version, license, signed-releases, GHCR image).
+- **"How it works"** trust-boundary diagram and a **Recipes** table (egress
+  allowlist, containerized Codex, safe Claude Code, MCP quarantine, CI dry-run).
+- CONTRIBUTING "Common contributions" guides: adding an adapter, writing a
+  security test, and authoring/recording a demo.
 - **Blocked-exfiltration demo** (`demo/exfil-demo.sh` + `demo/exfil.gif`), now
   the README hero: a sandboxed agent holds a live (fake) API key, reaches its one
   allowed API, but the attacker host is refused at the egress proxy (fail closed)
@@ -18,6 +23,8 @@ All notable changes to AgentBox are documented here.
   auto-pulled default image, and a new "Two ways to start" makes explicit that
   sandbox mechanics are ready with zero setup while a real AI agent is the
   optional next step (the default `run` agent is a no-op `echo`).
+- Cleaner visual hierarchy: the exfiltration GIF is the single hero; the
+  enforced-egress GIF is now linked from the Network section instead of inlined.
 
 ## v0.4.1 — 2026-06-12 (zero-friction first run + supply-chain trust)
 

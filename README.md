@@ -4,6 +4,15 @@
 
 # AgentBox
 
+<p align="center">
+  <a href="https://github.com/qosikz/agentbox/releases/latest"><img src="https://img.shields.io/github/v/release/qosikz/agentbox?sort=semver&color=3b82f6" alt="Latest release"></a>
+  <a href="https://github.com/qosikz/agentbox/actions/workflows/ci.yml"><img src="https://github.com/qosikz/agentbox/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/qosikz/agentbox?logo=go&logoColor=white" alt="Go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/qosikz/agentbox?color=blue" alt="License: Apache-2.0"></a>
+  <a href="#verifying-releases"><img src="https://img.shields.io/badge/releases-signed%20%2B%20SBOM%20%2B%20provenance-3b82f6" alt="Signed releases with SBOM and SLSA provenance"></a>
+  <a href="https://github.com/qosikz/agentbox/pkgs/container/agentbox%2Fruntime"><img src="https://img.shields.io/badge/ghcr.io-agentbox%2Fruntime-2496ED?logo=docker&logoColor=white" alt="GHCR runtime image"></a>
+</p>
+
 **Safe workspaces for AI coding agents — and a sandbox your agent harness can drive.**
 
 AgentBox runs AI coding agents (Claude Code, Codex, Gemini, Goose, OpenCode, or
@@ -111,15 +120,43 @@ commands. AgentBox puts deterministic guardrails around them:
 - **MCP** — a static scanner flags dangerous MCP server capabilities before you trust them.
 - **Audit** — every run is recorded under `.agentbox/sessions/<id>/`.
 
-The enforced-egress mechanics on their own — allowlist one domain, the sandbox
-reaches it and **nothing else**, DNS is dead, every attempt audited:
-
-<p align="center">
-  <img src="demo/egress.gif" alt="AgentBox enforces network egress — the agent reaches an allowlisted domain, DNS is dead, everything else fails closed, and every attempt is in the audit trail" width="820">
-</p>
+There's a second ~60s demo of the enforced-egress mechanics on their own —
+allowlist one domain, DNS dead, everything else fails closed, all audited:
+**[`demo/egress.gif`](demo/egress.gif)** ([all demos](demo/)).
 
 AgentBox does not make an unsafe agent magically safe. It creates guardrails, and
 it is honest about what it does and does not enforce.
+
+## How it works
+
+Every run drops the agent down a one-way funnel: a copy of your repo, a hardened
+container, and a single filtered exit. Everything inside the boundary is created
+per-run and torn down after; the only way out is HTTP(S) to domains you
+allowlisted.
+
+```text
+   Agent harness  (Claude Code · OpenClaw · Hermes · any MCP/skill host)
+        │
+        │   agentbox exec  ·  MCP server  ·  installed skill
+        ▼
+   ┌── policy trust boundary ───────────────────────────────────────────────
+   │
+   │   ① Disposable workspace   copy-on-run; repo never mounted wholesale
+   │            │               (.env, ~/.ssh, ~/.aws, Docker socket excluded)
+   │            ▼
+   │   ② Container runtime      non-root · --cap-drop ALL · no-new-privileges;
+   │            │               only secrets.allow keys injected, redacted in logs
+   │            ▼
+   │   ③ Egress proxy           per-run internal network · DNS sunk · fail closed
+   │            │
+   └────────────┼───────────────────────────────────────────────────────────
+                ▼
+   Allowlisted domains only   e.g. your model API — everything else denied
+```
+
+Local mode (`--runtime local --unsafe`) skips the container and egress proxy: it
+forwards a minimal env and runs on the host, and says so. **Container mode is the
+default and the only mode that enforces the network boundary.**
 
 ## Install
 
@@ -347,6 +384,18 @@ openclaw mcp add agentbox --command agentbox --arg mcp --arg serve
 codex mcp add agentbox -- agentbox mcp serve
 gemini mcp add agentbox agentbox mcp serve
 ```
+
+## Recipes
+
+Common jobs, each built from features shown above — no new concepts:
+
+| Goal | How | Pointer |
+|------|-----|---------|
+| **Egress allowlist for model APIs** | `network.mode: allowlist` with your provider's domains (e.g. `api.openai.com`) — the agent reaches its API and nothing else, no `--yes-unsafe`. | [How it works](#how-it-works) · [`examples/agentbox.codex.yaml`](examples/agentbox.codex.yaml) |
+| **Containerized Codex agent** | Bake the CLI into an image; inject the key at runtime from `secrets.allow`. | [Run an agent fully containerized](#run-an-agent-fully-containerized-baked-in-agents) · [`examples/agents/`](examples/agents) |
+| **Safe Claude Code workflow** | `agentbox run "<task>" --agent claude --runtime local --commit` — OAuth login stays local; changes land on a new branch. | [Example: a real agent](#example-a-real-agent-claude-code) |
+| **MCP server quarantine** | `agentbox mcp scan ./server` statically flags dangerous capabilities (exit 2 if unsafe) before you trust a tool. | [Commands](#commands) |
+| **CI dry-run for untrusted PRs** | The composite Action defaults to `--dry-run` and uploads the session as an artifact — review a fork PR's plan without running it. | [GitHub Action](#github-action) · [`examples/github-action-agentbox.yml`](examples/github-action-agentbox.yml) |
 
 ## Policy
 
