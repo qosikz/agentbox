@@ -2,17 +2,19 @@
 
 All notable changes to Andbo are documented here.
 
-## Unreleased
+## v0.6.0 — 2026-06-13 (renamed to Andbo)
 
 ### Renamed
 - **The project is now Andbo (formerly AgentBox).** All commands, the module
   path (`github.com/qosikz/andbo`), the binary (`andbo`), the config file
   (`andbo.yaml`), the state directory (`.andbo/`), environment variables
   (`ANDBO_*`), the published image (`ghcr.io/qosikz/andbo/runtime`), and the
-  agent skill (`andbo-sandbox`) were renamed. Earlier changelog entries below
-  are written with the new name for consistency; they shipped under the old
-  name. The GitHub repository and published artifacts move to the new name at
-  the next release.
+  agent skill (`andbo-sandbox`) were renamed, along with the README banner and
+  tagline ("Disposable sandboxes for AI coding agents"). Earlier changelog
+  entries below are written with the new name for consistency; they shipped
+  under the old name. The GitHub repository is now `qosikz/andbo` (the old URL
+  redirects) and the runtime image is republished under
+  `ghcr.io/qosikz/andbo/runtime` with this release.
 
 ### Changed
 - The fallback commit identity used when a repo has no configured git identity
@@ -36,7 +38,7 @@ All notable changes to Andbo are documented here.
   Codex, MCP server quarantine, CI dry-run for untrusted PRs.
 - Project **banner** + trust **badges** (release, CI, Go version, license,
   signed-releases, GHCR image), and a **"How it works"** trust-boundary diagram.
-- **Blocked-exfiltration demo** (`demo/exfil-demo.sh` + `demo/exfil.gif`), the
+- **Blocked-exfiltration demo** (`demo/exfil-demo.sh` + `demo/blocked-exfil.gif`), the
   README hero: a sandboxed agent holds a live (fake) API key, reaches its one
   allowed API, but the attacker host is refused at the egress proxy (fail closed)
   and the saved audit record redacts the key — all real, no mocks. The fake key

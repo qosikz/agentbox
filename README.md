@@ -29,7 +29,7 @@ subagents before trusting them. Via `andbo exec`, an MCP server, or a
 cross-harness skill.
 
 <p align="center">
-  <img src="demo/exfil.gif" alt="A sandboxed agent holds a live API key but cannot leak it — the attacker host is refused at the egress proxy (fail closed), and even when the agent dumps the key into its own output the saved audit record redacts it" width="860">
+  <img src="demo/blocked-exfil.gif" alt="A sandboxed agent holds a live API key but cannot leak it — the attacker host is refused at the egress proxy (fail closed), and even when the agent dumps the key into its own output the saved audit record redacts it" width="860">
 </p>
 
 > _A sandboxed agent holds a **live API key** — and has nowhere to leak it. Your one allowed API stays reachable; the attacker host is refused at the proxy (fail closed); and even when the agent dumps the key into its output, the audit record **redacts** it. ~60s, all real. ([how it's recorded](demo/))_
@@ -55,7 +55,7 @@ Policy: andbo.yaml
 ✓ Session saved
 ```
 
-> **Status: active development (v0.4.1).** Dry-run, sessions, policy, MCP
+> **Status: active development (v0.6.0).** Dry-run, sessions, policy, MCP
 > scanning, real container execution (Docker or Podman), **enforced network
 > egress** (allowlist), harness integration (`exec` / `mcp serve` / `skill`),
 > and baked-in containerized agents are supported. A signed default runtime

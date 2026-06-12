@@ -7,7 +7,7 @@ running and `andbo` on your `PATH` (or `ANDBO=/path/to/andbo`).
 
 | Demo | Script | GIF | Shows |
 |------|--------|-----|-------|
-| **Blocked exfiltration** (hero) | [`exfil-demo.sh`](exfil-demo.sh) | [`exfil.gif`](exfil.gif) | An agent holds a live API key but can't leak it — attacker host refused, audit record redacts the key. |
+| **Blocked exfiltration** (hero) | [`exfil-demo.sh`](exfil-demo.sh) | [`blocked-exfil.gif`](blocked-exfil.gif) | An agent holds a live API key but can't leak it — attacker host refused, audit record redacts the key. |
 | **Enforced egress** | [`egress-demo.sh`](egress-demo.sh) | _record from [`egress.cast`](egress.cast)_ | Allowlist one domain; the sandbox reaches it and nothing else; DNS dead; fail closed; audited. |
 
 ## Blocked exfiltration — `exfil-demo.sh`
@@ -86,7 +86,7 @@ asciinema rec demo/exfil.cast \
 **GIF (simplest for a README):**
 
 ```bash
-agg --theme monokai --font-size 22 demo/exfil.cast demo/exfil.gif
+agg --theme monokai --font-size 22 demo/exfil.cast demo/blocked-exfil.gif
 ```
 
 **SVG (sharper, smaller, selectable text):**
@@ -106,7 +106,7 @@ asciinema upload egress.cast      # prints an asciinema.org URL
 GIF:
 
 ```markdown
-![Andbo blocks exfiltration](demo/exfil.gif)
+![Andbo blocks exfiltration](demo/blocked-exfil.gif)
 ```
 
 SVG:
