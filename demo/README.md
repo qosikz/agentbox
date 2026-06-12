@@ -8,7 +8,7 @@ running and `agentbox` on your `PATH` (or `AGENTBOX=/path/to/agentbox`).
 | Demo | Script | GIF | Shows |
 |------|--------|-----|-------|
 | **Blocked exfiltration** (hero) | [`exfil-demo.sh`](exfil-demo.sh) | [`exfil.gif`](exfil.gif) | An agent holds a live API key but can't leak it — attacker host refused, audit record redacts the key. |
-| **Enforced egress** | [`egress-demo.sh`](egress-demo.sh) | [`egress.gif`](egress.gif) | Allowlist one domain; the sandbox reaches it and nothing else; DNS dead; fail closed; audited. |
+| **Enforced egress** | [`egress-demo.sh`](egress-demo.sh) | _record from [`egress.cast`](egress.cast)_ | Allowlist one domain; the sandbox reaches it and nothing else; DNS dead; fail closed; audited. |
 
 ## Blocked exfiltration — `exfil-demo.sh`
 
@@ -106,7 +106,7 @@ asciinema upload egress.cast      # prints an asciinema.org URL
 GIF:
 
 ```markdown
-![AgentBox enforces network egress](demo/egress.gif)
+![AgentBox blocks exfiltration](demo/exfil.gif)
 ```
 
 SVG:

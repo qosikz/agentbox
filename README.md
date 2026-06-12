@@ -120,9 +120,9 @@ commands. AgentBox puts deterministic guardrails around them:
 - **MCP** — a static scanner flags dangerous MCP server capabilities before you trust them.
 - **Audit** — every run is recorded under `.agentbox/sessions/<id>/`.
 
-There's a second ~60s demo of the enforced-egress mechanics on their own —
-allowlist one domain, DNS dead, everything else fails closed, all audited:
-**[`demo/egress.gif`](demo/egress.gif)** ([all demos](demo/)).
+A second ~60s demo covers the enforced-egress mechanics on their own — allowlist
+one domain, DNS dead, everything else fails closed, all audited. It's recordable
+from [`demo/egress-demo.sh`](demo/egress-demo.sh) ([all demos](demo/)).
 
 AgentBox does not make an unsafe agent magically safe. It creates guardrails, and
 it is honest about what it does and does not enforce.
