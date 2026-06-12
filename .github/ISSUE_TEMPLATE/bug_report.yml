@@ -1,0 +1,53 @@
+name: Bug report
+description: Something didn't behave as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! **Redact any secrets** from logs/policy before pasting.
+        For a security vulnerability, please use the private report flow instead (see SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: AgentBox version
+      description: Output of `agentbox version`
+      placeholder: agentbox v0.4.0 commit=...
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Container engine / runtime
+      options:
+        - Docker
+        - Podman
+        - local (--runtime local)
+        - dry-run only
+        - N/A
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / arch
+      placeholder: macOS 15 arm64 / Ubuntu 24.04 amd64
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The command you ran, what happened, and what you expected.
+      placeholder: |
+        Command: agentbox ...
+        Policy (redacted): ...
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / session output (redacted)
+      render: text

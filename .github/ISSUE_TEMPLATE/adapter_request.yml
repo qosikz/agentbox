@@ -1,0 +1,31 @@
+name: Agent adapter / runtime image request
+description: Request turnkey support for another coding agent
+labels: ["enhancement", "area: adapters"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        AgentBox can already run **any** CLI agent via the `custom` adapter — a
+        built-in adapter or a worked `examples/agents/` image just makes one turnkey.
+  - type: input
+    id: agent
+    attributes:
+      label: Which agent?
+      placeholder: e.g. OpenHands, Cline, ...
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Non-interactive (headless) command
+      description: The single-shot invocation, and how the task text is passed.
+      placeholder: 'myagent run --headless "{{ task }}"'
+  - type: input
+    id: auth
+    attributes:
+      label: Auth env var (if any)
+      placeholder: e.g. MYAGENT_API_KEY
+  - type: textarea
+    id: links
+    attributes:
+      label: Docs / install instructions

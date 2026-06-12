@@ -42,11 +42,11 @@ Policy: agentbox.yaml
 ✓ Session saved
 ```
 
-> **Status: active development (v0.3.1).** Dry-run, sessions, policy, MCP
-> scanning, real container execution (Docker or Podman), harness integration
-> (`exec` / `mcp serve` / `skill`), and baked-in containerized agents are
-> supported. Real runs require a runtime image you provide (see
-> [Runtime image](#runtime-image)).
+> **Status: active development (v0.4.0).** Dry-run, sessions, policy, MCP
+> scanning, real container execution (Docker or Podman), **enforced network
+> egress** (allowlist), harness integration (`exec` / `mcp serve` / `skill`),
+> and baked-in containerized agents are supported. Real runs require a runtime
+> image you provide (see [Runtime image](#runtime-image)).
 
 ## Add AgentBox to your agent harness
 
