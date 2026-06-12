@@ -1,17 +1,22 @@
 # Example AgentBox runtime image.
 #
 # This is the image the AGENT runs inside (referenced by runtime.image in the
-# policy, default: agentbox/default:latest). It is NOT the AgentBox CLI image.
-# Build it before doing real (non-dry-run) container runs:
+# policy). It is NOT the AgentBox CLI image.
 #
-#   docker build -t agentbox/default:latest -f examples/runtime.Dockerfile examples/
+# The default policy points at the published, multi-arch, signed image
+# `ghcr.io/qosikz/agentbox/runtime:latest`, which `agentbox run` pulls
+# automatically — so you do NOT need to build anything to get started.
 #
-# Add whatever toolchains your agent and tests need (node, python, go, etc.).
+# Build your own only when you need extra toolchains (node, python, go, tests):
+#
+#   docker build -t my/agentbox-runtime:latest -f examples/runtime.Dockerfile examples/
+#
+# then set `runtime.image: my/agentbox-runtime:latest` in your policy.
 FROM debian:bookworm-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates git curl \
+        ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 # Run as a non-root user; AgentBox also passes --user at runtime.

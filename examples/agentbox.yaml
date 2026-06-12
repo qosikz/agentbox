@@ -1,7 +1,7 @@
 runtime:
   isolation: container
   engine: docker
-  image: agentbox/default:latest
+  image: ghcr.io/qosikz/agentbox/runtime:latest
   cleanup: true
 
 agent:

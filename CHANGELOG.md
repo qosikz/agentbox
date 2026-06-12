@@ -2,6 +2,35 @@
 
 All notable changes to AgentBox are documented here.
 
+## v0.4.1 — 2026-06-12 (zero-friction first run + supply-chain trust)
+
+Adoption and trust packaging: a real `agentbox run` now works with no setup, and
+every release is verifiable.
+
+### Added
+- **Published default runtime image** `ghcr.io/qosikz/agentbox/runtime:latest`
+  (multi-arch linux/amd64+arm64, non-root, minimal Debian + `git` +
+  `ca-certificates`). The default policy points at it and Docker/Podman pull it
+  automatically — no image to build before the first container run.
+- **Signed releases (Sigstore / keyless).** `checksums.txt` is signed with
+  `cosign sign-blob`; verify with the published `.sig` + `.pem` and the workflow
+  identity. The runtime image is signed by digest.
+- **SBOM** (SPDX): a dependency SBOM for the release plus an image SBOM scanned
+  from the published runtime image.
+- **SLSA build provenance** attestations for the release binaries and the image
+  (verifiable with `gh attestation verify`).
+- `publish-image.yml` workflow; a "Verifying releases" guide in the README.
+
+### Changed
+- Default `runtime.image` repointed from the unpublished `agentbox/default:latest`
+  to the published GHCR image, across `agentbox init`, examples, and docs.
+- All GitHub Actions are pinned to commit SHAs (release, CI, and the composite
+  action) — supply-chain hardening against tag-mutation. Release/publish jobs run
+  with least-privilege `permissions` and OIDC (`id-token`/`attestations: write`).
+
+### Fixed
+- README status line said `v0.3.1` while the latest release was `v0.4.0`.
+
 ## v0.4.0 — 2026-06-12 (enforced network allowlist)
 
 The flagship safety milestone: `network.mode: allowlist` is now **enforced**,

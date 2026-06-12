@@ -42,11 +42,13 @@ Policy: agentbox.yaml
 ✓ Session saved
 ```
 
-> **Status: active development (v0.4.0).** Dry-run, sessions, policy, MCP
+> **Status: active development (v0.4.1).** Dry-run, sessions, policy, MCP
 > scanning, real container execution (Docker or Podman), **enforced network
 > egress** (allowlist), harness integration (`exec` / `mcp serve` / `skill`),
-> and baked-in containerized agents are supported. Real runs require a runtime
-> image you provide (see [Runtime image](#runtime-image)).
+> and baked-in containerized agents are supported. A signed default runtime
+> image is published and pulled automatically — `agentbox run` works out of the
+> box (see [Runtime image](#runtime-image) and
+> [Verifying releases](#verifying-releases)).
 
 ## Add AgentBox to your agent harness
 
@@ -319,17 +321,24 @@ A few runtime knobs worth knowing:
 ## Runtime image
 
 Real container runs execute the agent inside a container image (Docker or
-Podman). The default policy
-references `agentbox/default:latest`, which **you must provide** — there is no
-published image yet. Build a minimal one from the example:
+Podman). The default policy references the published, multi-arch
+`ghcr.io/qosikz/agentbox/runtime:latest`, which Docker/Podman **pull
+automatically** on first run — so `agentbox run` works out of the box with no
+image to build. The image is a minimal Debian base with `ca-certificates` and
+`git`, run as a non-root user; it is signed and has SLSA build provenance (see
+[Verifying releases](#verifying-releases)).
+
+Need extra toolchains (node, python, go, your test deps)? Build your own from
+the example and point your policy at it:
 
 ```bash
-docker build -t agentbox/default:latest -f examples/runtime.Dockerfile examples/
-agentbox run "fix tests"        # now uses your image
+docker build -t my/agentbox-runtime:latest -f examples/runtime.Dockerfile examples/
+# then set runtime.image: my/agentbox-runtime:latest in agentbox.yaml
+agentbox run "fix tests"
 ```
 
-Until you build a runtime image, use `--dry-run` (the supported preview path) or
-`--runtime local --unsafe` to run on the host.
+Prefer not to run a container at all? Use `--dry-run` (the supported preview
+path) or `--runtime local --unsafe` to run on the host.
 
 ## Sessions
 
@@ -356,6 +365,42 @@ See [SECURITY.md](SECURITY.md) and
 [docs/03_security_model_and_threat_model.md](docs/03_security_model_and_threat_model.md).
 The security acceptance tests (§8) live in `internal/cli/security_test.go`.
 
+## Verifying releases
+
+Release artifacts are built by a pinned GitHub Actions workflow and signed with
+[Sigstore](https://www.sigstore.dev/) keyless signing — no long-lived keys, the
+signing identity is the workflow itself. Every release carries a SPDX **SBOM**
+(`agentbox.spdx.json`) and a **SLSA build-provenance** attestation.
+
+Verify the binaries (the signature covers `checksums.txt`, which covers every
+binary by SHA-256):
+
+```bash
+# 1. checksums are signed by the release workflow (keyless / Sigstore)
+cosign verify-blob \
+  --certificate checksums.txt.pem \
+  --signature   checksums.txt.sig \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/qosikz/agentbox/\.github/workflows/release\.yml@' \
+  checksums.txt
+
+# 2. your downloaded binary matches the signed checksum
+shasum -a 256 -c checksums.txt --ignore-missing
+
+# 3. (alternative) GitHub-native build provenance
+gh attestation verify agentbox_linux_amd64 --repo qosikz/agentbox
+```
+
+Verify the runtime image (signed by digest, with provenance pushed to GHCR):
+
+```bash
+cosign verify ghcr.io/qosikz/agentbox/runtime:latest \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/qosikz/agentbox/\.github/workflows/publish-image\.yml@'
+
+gh attestation verify oci://ghcr.io/qosikz/agentbox/runtime:latest --repo qosikz/agentbox
+```
+
 ## MVP limitations (honest)
 
 - `network: allowlist` is enforced for **container** runs only (HTTP/HTTPS via
@@ -366,8 +411,8 @@ The security acceptance tests (§8) live in `internal/cli/security_test.go`.
 - `commands.deny` is best-effort and cannot stop an agent that spawns shells indirectly.
 - `budget` token/USD caps depend on adapter support and are reported as `unknown`
   otherwise (`max_runtime_minutes` is enforced).
-- Real container execution requires a runtime image you build; there is no
-  published runtime image yet.
+- The published default runtime image is a minimal base (Debian + `git` +
+  `ca-certificates`); agents needing other toolchains require a custom image.
 - Secret redaction is best-effort and may miss unknown formats.
 
 ## Development

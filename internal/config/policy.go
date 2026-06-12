@@ -106,7 +106,7 @@ func DefaultPolicy() Policy {
 		Runtime: RuntimePolicy{
 			Isolation: "container",
 			Engine:    "docker",
-			Image:     "agentbox/default:latest",
+			Image:     "ghcr.io/qosikz/agentbox/runtime:latest",
 			Cleanup:   true,
 		},
 		Agent: AgentPolicy{
@@ -177,7 +177,7 @@ const DefaultPolicyYAML = `# AgentBox policy
 runtime:
   isolation: container        # container (safe) | local (unsafe)
   engine: docker              # docker | podman
-  image: agentbox/default:latest
+  image: ghcr.io/qosikz/agentbox/runtime:latest   # published default; pull is automatic
   cleanup: true
 
 agent:
