@@ -126,10 +126,21 @@ func mapWorkspace(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpec) 
 
 	switch {
 	case len(rs.WritePaths) == 0:
-	case host != "" && len(rs.WritePaths) == 1 && rs.WritePaths[0] == host:
-		// The sanitized workspace copy, delivered by the transport checked below.
+	case host == "":
+		return "", fmt.Errorf("runtime spec mounts %d host path(s) but declares no workspace; a hostPath volume would expose the node filesystem, so the only directory that can cross into a Job is the sanitized workspace copy named by RuntimeSpec.Workdir. Set Workdir to the workspace, or run this workload on the container runtime", len(rs.WritePaths))
 	default:
-		return "", fmt.Errorf("runtime spec mounts %d host path(s) beyond the workspace copy; a hostPath volume would expose the node filesystem, so the only directory that can cross into a Job is the one named by RuntimeSpec.Workdir (currently %q). Drop the extra mounts, or run this workload on the container runtime", len(rs.WritePaths), host)
+		// Count only the paths that are actually a problem: reporting the total
+		// would describe a spec that mounts the workspace plus one extra
+		// directory as though both were extra.
+		var extra int
+		for _, p := range rs.WritePaths {
+			if p != host {
+				extra++
+			}
+		}
+		if extra > 0 {
+			return "", fmt.Errorf("runtime spec mounts %d host path(s) beyond the workspace copy at %q; a hostPath volume would expose the node filesystem, so no other directory can cross into a Job. Drop the extra mount(s), or run this workload on the container runtime", extra, host)
+		}
 	}
 
 	// CommandSpec.WorkingDir is likewise a host directory (the local runner

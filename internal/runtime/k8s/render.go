@@ -305,10 +305,18 @@ func (s JobSpec) containerSecurityContext() containerSecurityContext {
 //     this codebase's secrets would otherwise appear.
 //   - It mounts only the workspace volume — it has no reason to touch the
 //     agent's scratch space.
-//   - `cp -a` preserves modes and timestamps; ownership is silently skipped
-//     because the container is non-root, which is the intended trade (see
-//     EnforcementNotes). The trailing "/." copies the CONTENTS of the source,
-//     including dotfiles such as .git, into an existing destination directory.
+//   - "-R", NOT "-a", and no other preserve flag. kubelet creates the emptyDir
+//     owned by root and fsGroup only changes its GROUP, so the volume root
+//     keeps uid 0 no matter what runAsUser and fsGroup are set to. Any preserve
+//     flag makes coreutils treat a failure to copy the DESTINATION directory's
+//     metadata as fatal, and setting a directory's timestamps needs ownership
+//     (utimensat), not write permission — so `cp -a` exits 1 on a real cluster
+//     even though every file copied, and the failed init container takes the
+//     whole Job down. `-R` still copies modes, dotfiles such as .git, and
+//     symlinks as symlinks; it drops mtimes, which costs one slower `git
+//     status` while git rebuilds its stat cache.
+//   - The trailing "/." copies the CONTENTS of the source, including dotfiles,
+//     into an existing destination directory.
 func (s JobSpec) initContainers() []container {
 	if s.WorkspaceTransport != WorkspaceFromImage {
 		return nil
@@ -318,7 +326,7 @@ func (s JobSpec) initContainers() []container {
 		Image:           s.Image,
 		ImagePullPolicy: "Always",
 		Command:         []string{"cp"},
-		Args:            []string{"-a", "--", s.ImageWorkspacePath + "/.", s.WorkingDir},
+		Args:            []string{"-R", "--", s.ImageWorkspacePath + "/.", s.WorkingDir},
 		WorkingDir:      s.WorkingDir,
 		Resources:       s.resources(),
 		SecurityContext: s.containerSecurityContext(),

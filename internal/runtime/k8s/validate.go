@@ -48,9 +48,23 @@ func reservedMountPath(dir string) (string, bool) {
 }
 
 // pathsOverlap reports whether a and b name the same directory or one contains
-// the other. Both must already be clean absolute paths for the prefix test to
-// be meaningful, which Validate checks before calling this.
+// the other.
+//
+// "/" is handled first because the prefix form gets it wrong: b+"/" would be
+// "//", so pathsOverlap("/", "/work") would say the root contains nothing.
+// Nothing reaches here with "/" today — Validate rejects a "/" workspace source
+// earlier — but a containment test that is wrong for the root is a trap for
+// whoever removes that check as redundant.
+//
+// The prefix test is only meaningful for clean absolute paths. Callers pass
+// values Validate constrains, but it collects all problems rather than stopping
+// at the first, so an unclean WorkingDir can still reach this and hide a real
+// overlap. That is safe only because the same Validate run rejects the spelling
+// on its own.
 func pathsOverlap(a, b string) bool {
+	if a == "/" || b == "/" {
+		return true
+	}
 	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 

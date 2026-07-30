@@ -58,7 +58,7 @@ spec:
           command:
             - cp
           args:
-            - -a
+            - -R
             - --
             - /andbo/workspace/.
             - /work

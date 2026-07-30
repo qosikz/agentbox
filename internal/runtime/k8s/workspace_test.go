@@ -127,7 +127,9 @@ func TestValidate_WorkspaceTransportRejects(t *testing.T) {
 				s.WorkspaceTransport = WorkspaceFromImage
 				s.ImageWorkspacePath = "/"
 			},
-			wantSub: "/",
+			// Not "/" — every error contains a slash, so that would pass for any
+			// rejection at all.
+			wantSub: "image root",
 		},
 		{
 			name: "source path with unsafe runes",
@@ -263,8 +265,13 @@ func TestRender_ImageTransportCopiesIntoTheWritableVolume(t *testing.T) {
 	// "--" ends option parsing, so a path can never be read as a cp flag. The
 	// validator already requires both paths to start with "/", but the separator
 	// makes the whole class structurally impossible rather than merely excluded.
+	// "-R", not "-a". kubelet creates the emptyDir owned by root and fsGroup
+	// only changes its GROUP, so the volume root stays uid 0. Any preserve flag
+	// makes cp fatal when it cannot set the destination directory's timestamps
+	// (utimensat needs ownership, not write permission), so `cp -a` exits 1 on
+	// every real cluster and the init container fails the whole Job.
 	args, _ := init["args"].([]any)
-	want := []any{"-a", "--", imageWorkspaceSrc + "/.", DefaultWorkingDir}
+	want := []any{"-R", "--", imageWorkspaceSrc + "/.", DefaultWorkingDir}
 	if len(args) != len(want) {
 		t.Fatalf("initContainers[0].args = %v, want %v", args, want)
 	}
@@ -475,7 +482,9 @@ func TestFromRuntimeSpec_WorkspaceFailsClosed(t *testing.T) {
 			mutate: func(rs *runtime.RuntimeSpec, cs *runtime.CommandSpec) {
 				cs.WorkingDir = "/Users/alice/other-repo"
 			},
-			wantSub: "workspace",
+			// Not "workspace" — nearly every message in this slice says it, so
+			// the case would pass on any rejection.
+			wantSub: "command spec sets host working directory",
 		},
 		{
 			name: "HOME pointing somewhere other than the workspace",
@@ -528,6 +537,73 @@ func TestFromRuntimeSpec_WorkspaceFailsClosed(t *testing.T) {
 	}
 }
 
+// TestPathsOverlap covers the containment test the masking checks rely on,
+// including "/" — which the string form gets wrong (b+"/" becomes "//"), and
+// which is only latent because Validate rejects a "/" source before reaching
+// here. Relying on a guard elsewhere for correctness here is how that guard
+// gets removed later as redundant.
+func TestPathsOverlap(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"/work", "/work", true},
+		{"/work", "/work/src", true},
+		{"/work/src", "/work", true},
+		{"/", "/work", true},
+		{"/work", "/", true},
+		{"/", "/", true},
+		{"/work", "/work2", false},
+		{"/work2", "/work", false},
+		{"/andbo/workspace", "/work", false},
+		{"/tmp", "/work", false},
+	}
+
+	for _, tt := range tests {
+		if got := pathsOverlap(tt.a, tt.b); got != tt.want {
+			t.Errorf("pathsOverlap(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
+// TestFromRuntimeSpec_MountRejectionNamesTheActualCause covers two error
+// messages that described a different cause than the one that tripped them: a
+// spec with no workspace at all was told its mounts were "beyond the workspace
+// copy" (naming an empty path), and a spec with one extra mount beside the
+// workspace was told that BOTH paths were extra.
+func TestFromRuntimeSpec_MountRejectionNamesTheActualCause(t *testing.T) {
+	t.Run("no workspace declared", func(t *testing.T) {
+		rs := realRuntimeSpec()
+		rs.Workdir = ""
+		rs.WritePaths = []string{"/var/lib/other"}
+		delete(rs.Env, "HOME")
+
+		_, err := FromRuntimeSpec(imageWorkspaceSpec(), rs, runtime.CommandSpec{Executable: "andbo-agent"})
+		if err == nil {
+			t.Fatal("FromRuntimeSpec() = nil, want a rejection")
+		}
+		if !strings.Contains(err.Error(), "declares no workspace") {
+			t.Errorf("error = %q, want it to say no workspace was declared", err)
+		}
+		if strings.Contains(err.Error(), `""`) {
+			t.Errorf("error names an empty path as the workspace: %q", err)
+		}
+	})
+
+	t.Run("one extra mount beside the workspace", func(t *testing.T) {
+		rs := realRuntimeSpec()
+		rs.WritePaths = []string{hostWorkspacePath, "/etc/andbo"}
+
+		_, err := FromRuntimeSpec(imageWorkspaceSpec(), rs, realCommandSpec())
+		if err == nil {
+			t.Fatal("FromRuntimeSpec() = nil, want a rejection")
+		}
+		if !strings.Contains(err.Error(), "1 host path") {
+			t.Errorf("error = %q, want it to count exactly 1 extra path (not both mounts)", err)
+		}
+	})
+}
+
 // TestFromRuntimeSpec_DoesNotMutateCallerEnv covers map aliasing: JobSpec is
 // copied by value, but its Env map is not, so rewriting HOME in place would
 // edit the caller's map behind its back.
@@ -557,8 +633,10 @@ func TestSecurity_WorkspaceTransportIsDocumentedAsLimited(t *testing.T) {
 
 	for _, want := range []struct{ topic, substr string }{
 		{"results are not copied back out", "results"},
-		{"the image carries the workspace and anyone who can pull it can read it", "pull"},
-		{"the copy depends on cp being present in the image", "cp"},
+		// Not "pull": the pre-existing note about kubelet image pulls already
+		// contains it, so this case would pass with the new note deleted.
+		{"the image carries the workspace and anyone who can pull it can read it", "registry"},
+		{"the copy depends on cp being present in the image", "cp -r"},
 		// The transport declaration proves a transport was CHOSEN, not that the
 		// image actually holds the intended workspace. A source directory that
 		// exists but is empty copies nothing and exits 0.
