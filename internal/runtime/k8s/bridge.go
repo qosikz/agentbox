@@ -93,8 +93,10 @@ func FromRuntimeSpec(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpe
 // mapWorkspace validates the host-side workspace inputs and returns the host
 // workspace path, or "" when the run has none. The path is used ONLY to
 // recognise which inputs refer to the workspace so they can be remapped to the
-// pod path; it never reaches a manifest, where it would leak the host's
-// username and directory layout into an object applied to a shared cluster.
+// pod path. It never reaches a manifest, where it would leak the host's
+// username and directory layout into an object applied to a shared cluster —
+// which is why every channel that could carry it, including argv, is checked
+// here rather than trusted.
 func mapWorkspace(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpec) (string, error) {
 	// Read-only host mounts have no equivalent and, unlike the workspace, there
 	// is nothing to remap them to: a hostPath volume would expose the node
@@ -141,6 +143,25 @@ func mapWorkspace(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpec) 
 		return "", nil
 	}
 
+	// Command and Args are the one remaining channel that carries caller text
+	// verbatim into the manifest: the custom adapter's executable comes from
+	// policy, and the task text becomes an argument. A workspace path there is
+	// both a leak and a lie — the directory does not exist in the pod, where the
+	// workspace lives at base.WorkingDir. Reject rather than rewrite: silently
+	// editing an agent's argv or its task text is worse than failing.
+	//
+	// This bounds the claim to the WORKSPACE path. Some other host path a caller
+	// puts in argv (say a home-directory binary) still crosses; the renderer has
+	// no model of the host layout to recognise it.
+	if strings.Contains(cs.Executable, host) {
+		return "", fmt.Errorf("command executable %q is inside the host workspace %q, which does not exist in a Kubernetes pod; name the executable as it is installed in the image, or as a path under the pod working directory %q", cs.Executable, host, base.WorkingDir)
+	}
+	for i, arg := range cs.Args {
+		if strings.Contains(arg, host) {
+			return "", fmt.Errorf("command args[%d] names the host workspace path %q, which would leak the host's username and directory layout into a manifest applied to a shared cluster — and points at a directory the pod does not have; refer to the workspace by its pod path %q instead", i, host, base.WorkingDir)
+		}
+	}
+
 	// This is the check that prevents the silent failure. A Job has no path to
 	// the host, so the workspace can only arrive by a declared transport; with
 	// WorkspaceEmpty the manifest renders perfectly well and the agent starts on
@@ -152,23 +173,44 @@ func mapWorkspace(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpec) 
 	return host, nil
 }
 
+// containerHygieneEnv are the names internal/cli injects into every non-local
+// run to make a CONTAINER behave (buildAgentEnv): a fixed PATH because a docker
+// container inherits none, and the host's locale and terminal type.
+//
+// Kubernetes takes all of them from the image, so they are DROPPED rather than
+// carried. That is not a silent loss — it is the correct mapping, and in PATH's
+// case the safer one: forwarding Andbo's fixed PATH would override an image
+// whose agent lives outside the standard directories. Dropping by name is also
+// what makes the value irrelevant, which matters because a policy that
+// allowlists PATH as a secret makes buildAgentEnv overwrite the fixed value
+// with the HOST's — a value that must never reach a manifest.
+var containerHygieneEnv = map[string]bool{
+	"PATH":   true,
+	"LANG":   true,
+	"LC_ALL": true,
+	"TERM":   true,
+}
+
 // mapEnv merges the runtime and command environments (command wins, matching
-// the container runtime) and refuses everything except HOME.
+// the container runtime) and decides one of three fates for every name.
 //
 // The environment carried by a RuntimeSpec/CommandSpec is RESOLVED HOST
 // ENVIRONMENT: Andbo populates it by reading every name in policy.secrets.allow
 // out of the host, and feeds those same values to the log redactor — the
 // codebase classifies them as secrets. A rendered manifest is plain text stored
 // in etcd and readable by anyone who can get the Job, and envVar has no
-// valueFrom, so there is no safe way to carry them. Errors name no value.
+// valueFrom, so there is no safe way to carry them. So:
 //
-// HOME is the one exception, and it belongs to the workspace rather than to the
-// secret set: internal/cli points it at the workspace copy so git and package
-// managers work under a non-root UID. It is REWRITTEN to the pod working
-// directory — keeping the host value would leak the host layout, and dropping
-// it would leave HOME on the read-only root filesystem, where those same tools
-// fail. It is bridged ONLY when it is exactly the workspace path; a HOME
-// pointing anywhere else is an arbitrary host directory and is refused.
+//   - HOME is REWRITTEN to the pod working directory. It belongs to the
+//     workspace rather than to the secret set: internal/cli points it at the
+//     workspace copy so git and package managers work under a non-root UID.
+//     Keeping the host value would leak the host layout; dropping it would
+//     leave HOME on the read-only root filesystem, where those tools fail. It
+//     is bridged ONLY when it is exactly the workspace path — a HOME pointing
+//     anywhere else is an arbitrary host directory and is refused.
+//   - containerHygieneEnv names are DROPPED; the image supplies them.
+//   - Everything else is REFUSED, because it may be a live credential. Errors
+//     report a count and never a value.
 func mapEnv(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpec, hostWorkspace string) (map[string]string, error) {
 	merged := make(map[string]string, len(rs.Env)+len(cs.Env))
 	for k, v := range rs.Env {
@@ -180,12 +222,18 @@ func mapEnv(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpec, hostWo
 
 	home, hasHome := merged["HOME"]
 	bridgeHome := hasHome && hostWorkspace != "" && home == hostWorkspace
-	unbridgeable := len(merged)
-	if bridgeHome {
-		unbridgeable--
+
+	var unbridgeable int
+	for name := range merged {
+		switch {
+		case name == "HOME" && bridgeHome:
+		case containerHygieneEnv[name]:
+		default:
+			unbridgeable++
+		}
 	}
 	if unbridgeable > 0 {
-		return nil, fmt.Errorf("runtime/command environment carries %d variable(s) that cannot be bridged: Andbo resolves host secrets into it, and this renderer would inline them as plain text in the manifest; deliver them through a Kubernetes Secret (not supported in this slice), or set JobSpec.Env yourself with non-secret literals only. HOME is the only bridged name, and only when it points at the workspace", unbridgeable)
+		return nil, fmt.Errorf("runtime/command environment carries %d variable(s) that cannot be bridged: Andbo resolves host secrets into it, and this renderer would inline them as plain text in the manifest; deliver them through a Kubernetes Secret (not supported in this slice), or set JobSpec.Env yourself with non-secret literals only. Only HOME is bridged (and only when it points at the workspace); PATH, LANG, LC_ALL, and TERM are dropped because the image supplies them", unbridgeable)
 	}
 	if !bridgeHome {
 		return base.Env, nil

@@ -17,11 +17,21 @@ const imageWorkspaceSrc = "/andbo/workspace"
 
 // realRuntimeSpec is what internal/cli/cmd_run.go actually builds for a
 // container run with network.mode=deny and no allowlisted secrets.
+//
+// The environment matters: buildAgentEnv sets PATH to a fixed container PATH
+// for EVERY non-local isolation and passes LANG/LC_ALL/TERM through from the
+// host when they are set, and buildRuntimeSpec then adds HOME. A fixture that
+// carried HOME alone would certify a shape the producer never emits.
 func realRuntimeSpec() runtime.RuntimeSpec {
 	rs := containerSpec()
 	rs.Workdir = hostWorkspacePath
 	rs.WritePaths = []string{hostWorkspacePath}
-	rs.Env = map[string]string{"HOME": hostWorkspacePath}
+	rs.Env = map[string]string{
+		"HOME": hostWorkspacePath,
+		"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"LANG": "en_US.UTF-8",
+		"TERM": "xterm-256color",
+	}
 	return rs
 }
 
@@ -307,6 +317,15 @@ func TestFromRuntimeSpec_AcceptsTheRealWorkspaceShape(t *testing.T) {
 		t.Errorf("Env[HOME] = %q, want the pod working directory %q", got.Env["HOME"], got.WorkingDir)
 	}
 
+	// PATH, LANG, LC_ALL, and TERM are container-runtime hygiene that Kubernetes
+	// takes from the image; carrying Andbo's PATH would override an image whose
+	// agent lives outside the standard directories.
+	for _, dropped := range []string{"PATH", "LANG", "LC_ALL", "TERM"} {
+		if v, present := got.Env[dropped]; present {
+			t.Errorf("Env[%s] = %q, want it dropped: the image supplies it", dropped, v)
+		}
+	}
+
 	manifest, err := got.Render()
 	if err != nil {
 		t.Fatalf("Render() = %v, want nil", err)
@@ -318,6 +337,76 @@ func TestFromRuntimeSpec_AcceptsTheRealWorkspaceShape(t *testing.T) {
 		if strings.Contains(manifest, leak) {
 			t.Errorf("manifest leaks host path fragment %q:\n%s", leak, manifest)
 		}
+	}
+}
+
+// TestSecurity_ContainerHygieneEnvIsDroppedNotCarried covers the case where a
+// hygiene name holds a HOST value: policy `secrets.allow: [PATH]` makes
+// buildAgentEnv overwrite the fixed container PATH with the host's, which would
+// put the host layout in the manifest. Dropping by name is safe whatever the
+// value is, which is why these names are dropped rather than allowlisted.
+func TestSecurity_ContainerHygieneEnvIsDroppedNotCarried(t *testing.T) {
+	rs := realRuntimeSpec()
+	rs.Env["PATH"] = "/Users/alice/.local/bin:/usr/bin"
+
+	got, err := FromRuntimeSpec(imageWorkspaceSpec(), rs, realCommandSpec())
+	if err != nil {
+		t.Fatalf("FromRuntimeSpec() = %v, want nil", err)
+	}
+	if v, present := got.Env["PATH"]; present {
+		t.Fatalf("Env[PATH] = %q, want it dropped; a host PATH must never reach the manifest", v)
+	}
+
+	manifest, err := got.Render()
+	if err != nil {
+		t.Fatalf("Render() = %v, want nil", err)
+	}
+	if strings.Contains(manifest, "/Users/alice") {
+		t.Errorf("manifest leaks the host PATH:\n%s", manifest)
+	}
+}
+
+// TestSecurity_WorkspacePathCannotSurviveInArgv covers the last channel that
+// carries caller text verbatim into the manifest. Command and Args come from
+// the adapter (the custom adapter's executable is policy-supplied, and the task
+// text becomes an argument), so without this the host workspace path reaches a
+// manifest applied to a shared cluster — and names a directory that does not
+// exist in the pod.
+func TestSecurity_WorkspacePathCannotSurviveInArgv(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*runtime.CommandSpec)
+	}{
+		{
+			name:   "executable under the host workspace",
+			mutate: func(cs *runtime.CommandSpec) { cs.Executable = hostWorkspacePath + "/bin/myagent" },
+		},
+		{
+			name: "task text naming the host workspace",
+			mutate: func(cs *runtime.CommandSpec) {
+				cs.Args = []string{"--task", "port the code under " + hostWorkspacePath + "/legacy"}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs := realCommandSpec()
+			tt.mutate(&cs)
+
+			got, err := FromRuntimeSpec(imageWorkspaceSpec(), realRuntimeSpec(), cs)
+			if err == nil {
+				manifest, rerr := got.Render()
+				if rerr == nil && strings.Contains(manifest, hostWorkspacePath) {
+					t.Fatalf("host workspace path reached the manifest:\n%s", manifest)
+				}
+				t.Fatal("FromRuntimeSpec() accepted argv carrying the host workspace path, want a rejection")
+			}
+			// The error has to name the pod path, or the fix is not obvious.
+			if !strings.Contains(err.Error(), DefaultWorkingDir) {
+				t.Errorf("error = %q, want it to name the pod path %q", err, DefaultWorkingDir)
+			}
+		})
 	}
 }
 
@@ -470,6 +559,12 @@ func TestSecurity_WorkspaceTransportIsDocumentedAsLimited(t *testing.T) {
 		{"results are not copied back out", "results"},
 		{"the image carries the workspace and anyone who can pull it can read it", "pull"},
 		{"the copy depends on cp being present in the image", "cp"},
+		// The transport declaration proves a transport was CHOSEN, not that the
+		// image actually holds the intended workspace. A source directory that
+		// exists but is empty copies nothing and exits 0.
+		{"an empty source copies nothing and still succeeds", "empty"},
+		{"the renderer cannot verify the image carries the right workspace", "verify"},
+		{"the deadline covers the copy as well as the agent", "activedeadlineseconds"},
 	} {
 		if !strings.Contains(notes, want.substr) {
 			t.Errorf("enforcement notes do not mention %s (looking for %q):\n%s", want.topic, want.substr, notes)
