@@ -3,6 +3,7 @@ package k8s
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -18,6 +19,15 @@ var binarySuffixes = map[string]float64{
 	"Pi": 1 << 50,
 	"Ei": 1 << 60,
 }
+
+// numberOnly and numberWithExponent implement the Kubernetes quantity number
+// grammar: digits | digits.digits | digits. | .digits, with an optional
+// decimalExponent that is itself a suffix — so it cannot be combined with a
+// decimalSI or binarySI suffix.
+var (
+	numberOnly         = regexp.MustCompile(`^[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$`)
+	numberWithExponent = regexp.MustCompile(`^[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][-+]?[0-9]+)?$`)
+)
 
 var decimalSuffixes = map[string]float64{
 	"m": 1e-3,
@@ -58,6 +68,20 @@ func parseQuantity(s string) (float64, error) {
 	// but the error should name the real problem.
 	if strings.TrimSpace(num) != num {
 		return 0, fmt.Errorf("quantity %q contains whitespace", s)
+	}
+
+	// strconv.ParseFloat is a strict SUPERSET of the Kubernetes quantity
+	// grammar: it also accepts hex floats ("0x1p10") and underscore separators
+	// ("1_000"). Kubernetes additionally forbids combining an exponent with a
+	// decimalSI/binarySI suffix ("1e3Ki"), since a decimalExponent is itself a
+	// suffix. Screening the numeric part first keeps rejection at this boundary
+	// with an actionable error, instead of at apply time from the API server.
+	grammar := numberWithExponent
+	if mult != 1.0 {
+		grammar = numberOnly
+	}
+	if !grammar.MatchString(num) {
+		return 0, fmt.Errorf("quantity %q is not a valid Kubernetes quantity: %q is not a plain decimal number (no hex, no underscores, and an exponent cannot be combined with a suffix)", s, num)
 	}
 
 	v, err := strconv.ParseFloat(num, 64)
