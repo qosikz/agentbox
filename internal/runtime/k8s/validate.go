@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -169,6 +170,14 @@ func (s JobSpec) Validate() error {
 		add("workingDir must not be \"/\"; the root filesystem is read-only by design")
 	case hasUnsafeRunes(s.WorkingDir, false):
 		add("workingDir contains control, bidirectional, or zero-width characters")
+	case s.WorkingDir != path.Clean(s.WorkingDir):
+		// The reserved-path check below and Kubernetes' own duplicate-mountPath
+		// validation both compare mount paths as literal strings, while the
+		// KERNEL resolves them. Without this, "/work/../etc" slips past both and
+		// still mounts an empty volume over /etc. Reject rather than silently
+		// canonicalise, so the rendered mountPath is always the string the
+		// caller supplied.
+		add("workingDir %q is not a clean absolute path; remove any \"..\", \".\", repeated \"/\", or trailing \"/\" segments (it resolves to %q, and mount paths are compared literally)", s.WorkingDir, path.Clean(s.WorkingDir))
 	default:
 		// The working directory becomes a mountPath for an EMPTY volume, so
 		// pointing it at a system directory silently replaces the image's

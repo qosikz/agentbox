@@ -345,3 +345,84 @@ func TestSecurity_EnforcementNotesDoNotOverclaim(t *testing.T) {
 		t.Error("enforcement notes still claim absolute network isolation, which NetworkPolicy additivity makes false")
 	}
 }
+
+// TestSecurity_WorkingDirMustBeCanonical covers a bypass of the reserved-path
+// denylist found in review: reservedMountPath compares raw strings, so any
+// non-canonical spelling walks straight through it while the KERNEL still
+// resolves the mount to the reserved directory.
+func TestSecurity_WorkingDirMustBeCanonical(t *testing.T) {
+	bypasses := []string{
+		"/work/../etc",           // resolves to /etc: hides the CA trust store
+		"//etc",                  // doubled separator
+		"/./etc",                 // single-dot segment
+		"/work/../tmp",           // collides with the renderer's own scratch volume
+		"//tmp",                  //
+		"/work/../usr/local/bin", // hides the image's binaries
+		"/work/..//proc",         //
+		"/work/",                 // trailing separator: same path, second spelling
+		"/work/./sub",            //
+	}
+
+	for _, dir := range bypasses {
+		t.Run(dir, func(t *testing.T) {
+			s := validSpec()
+			s.WorkingDir = dir
+
+			if _, err := s.Render(); err == nil {
+				t.Fatalf("Render() accepted non-canonical workingDir %q; the mount path is compared literally but resolves elsewhere at runtime", dir)
+			}
+		})
+	}
+
+	// Canonical paths outside the reserved set must still work.
+	for _, dir := range []string{"/work", "/workspace", "/home/agent", "/srv/repo/sub"} {
+		t.Run("allowed"+dir, func(t *testing.T) {
+			s := validSpec()
+			s.WorkingDir = dir
+
+			if err := s.Validate(); err != nil {
+				t.Errorf("Validate() = %v, want nil for canonical path %q", err, dir)
+			}
+		})
+	}
+}
+
+// TestSecurity_QuantityGrammarMatchesKubernetes covers validator fidelity:
+// strconv.ParseFloat is a strict superset of the Kubernetes quantity grammar,
+// so forms Kubernetes rejects were passing validation here and failing later at
+// apply time instead of at the boundary.
+func TestSecurity_QuantityGrammarMatchesKubernetes(t *testing.T) {
+	rejected := []string{
+		"0x1p10", // hex float
+		"1_000",  // underscore separators
+		"1_0Gi",  //
+		"1e3m",   // exponent combined with a decimalSI suffix
+		"1e3Ki",  // exponent combined with a binarySI suffix
+		"1e3Mi",  //
+	}
+	for _, q := range rejected {
+		t.Run("reject/"+q, func(t *testing.T) {
+			if v, err := parseQuantity(q); err == nil {
+				t.Errorf("parseQuantity(%q) = %v, want an error: Kubernetes rejects this form", q, v)
+			}
+		})
+	}
+
+	// Forms Kubernetes accepts must keep working, with the right value.
+	accepted := map[string]float64{
+		"2": 2, "1.5": 1.5, "500m": 0.5, "1k": 1000, "5M": 5e6,
+		"1Ki": 1024, "512Mi": 512 * 1024 * 1024, "2Gi": 2 * 1024 * 1024 * 1024,
+		"1e3": 1000, "1E3": 1000, "1E": 1e18, "100m": 0.1, ".5": 0.5,
+	}
+	for q, want := range accepted {
+		t.Run("accept/"+q, func(t *testing.T) {
+			got, err := parseQuantity(q)
+			if err != nil {
+				t.Fatalf("parseQuantity(%q) = %v, want %v", q, err, want)
+			}
+			if got != want {
+				t.Errorf("parseQuantity(%q) = %v, want %v", q, got, want)
+			}
+		})
+	}
+}

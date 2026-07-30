@@ -35,6 +35,20 @@ All notable changes to Andbo are documented here.
   execution, and that `$HOME` is not writable under the read-only root
   filesystem.
 
+### Fixed
+- **Kubernetes renderer: `workingDir` reserved-path bypass.** The reserved
+  mount-path check compared raw strings, so a non-canonical spelling such as
+  `/work/../etc` walked past it while the kernel still resolved the mount to
+  `/etc` — hiding the image's CA trust store and `/etc/passwd` behind an empty
+  volume. `workingDir` must now be a clean absolute path; non-canonical spellings
+  are rejected rather than silently canonicalised, so the rendered `mountPath` is
+  always the string the caller supplied.
+- **Kubernetes renderer: quantity validation accepted forms Kubernetes rejects.**
+  `strconv.ParseFloat` is a strict superset of the Kubernetes quantity grammar,
+  so hex floats (`0x1p10`), underscore separators (`1_000`), and an exponent
+  combined with a suffix (`1e3Ki`) passed validation and failed later at apply
+  time. They are now rejected at the boundary with an actionable error.
+
 ## v0.6.0 — 2026-06-13 (renamed to Andbo)
 
 ### Renamed
