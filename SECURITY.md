@@ -43,10 +43,25 @@ boundaries **and the honest limitations** are, in short:
   unsafe opt-in.
 - **Runtime** — non-root, `--cap-drop ALL`, `--security-opt no-new-privileges`,
   never privileged, never the Docker socket.
+- **Kubernetes (`andbo k8s render`)** — **rendering only, nothing enforced at
+  runtime.** Andbo emits a hardened `Job` and a default-deny `NetworkPolicy` and
+  never contacts a cluster, so every control in those manifests is enforced by
+  *your* cluster, not by Andbo: the NetworkPolicy is inert unless the CNI
+  implements it, it is additive and cannot subtract from another policy that
+  also selects the pod, and it does nothing at all unless whoever applies the
+  manifest applies it too. What Andbo *does* enforce is what it will emit —
+  never privileged, no host namespaces, no `hostPath`, no service-account token,
+  non-root only, bounded resources and deadline — and what it refuses to emit:
+  `network.mode` `allowlist`/`open`, `runtime.isolation: local`, host mounts,
+  and any host environment variable (a manifest is plain text in etcd, so
+  secrets never cross). `andbo k8s render` writes the manifest and stops.
 
 **In scope (valuable):** breaking an *enforced* boundary — e.g. egress escape
 from a container run, secret leakage into logs/sandbox, sandbox escape, or a way
-for a harness to escalate past policy via the `exec`/MCP/skill surfaces.
+for a harness to escalate past policy via the `exec`/MCP/skill surfaces. For the
+Kubernetes path specifically: any input to `andbo k8s render` that makes it emit
+a manifest weaker than the guarantees above, leak a host secret or host path into
+the rendered YAML, or contact a cluster at all.
 
 **Not a vulnerability (expected behavior):** that `--runtime local` or
 `network: open` are unsafe — these are opt-in modes that require explicit

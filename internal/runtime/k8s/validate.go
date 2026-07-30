@@ -261,7 +261,10 @@ func (s JobSpec) Validate() error {
 	if len(problems) == 0 {
 		return nil
 	}
-	return fmt.Errorf("kubernetes job spec is invalid:\n  - %s\n\nFix the fields above, then render again. Start from DefaultJobSpec() for secure defaults.",
+	// The trailing line names no Go symbol on purpose: this error reaches CLI
+	// users through `andbo k8s render`, and telling them to call DefaultJobSpec()
+	// is not something they can act on from a terminal.
+	return fmt.Errorf("kubernetes job spec is invalid:\n  - %s\n\nFix the fields above, then render again. Every field not named above already holds this renderer's secure default.",
 		strings.Join(problems, "\n  - "))
 }
 

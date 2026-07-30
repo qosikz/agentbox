@@ -59,8 +59,12 @@ func ok(w io.Writer, msg string) {
 }
 
 // warn prints a warning line to stderr.
-func warn(msg string) {
-	fmt.Fprintf(os.Stderr, "! %s\n", msg)
+func warn(msg string) { warnTo(os.Stderr, msg) }
+
+// warnTo prints a warning line to w. Commands that thread a writer use this so
+// their diagnostics land on the caller's stream rather than the process's.
+func warnTo(w io.Writer, msg string) {
+	fmt.Fprintf(w, "! %s\n", msg)
 }
 
 // printJSON marshals v as indented JSON to w.
