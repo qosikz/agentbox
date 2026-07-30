@@ -250,6 +250,7 @@ default and the only mode that enforces the network boundary.**
 | `andbo mcp scan <path> [--json]` | Statically scan an MCP server (exit 2 if unsafe) |
 | `andbo mcp serve` | Serve sandbox tools over MCP (stdio) to agent harnesses |
 | `andbo skill install` | Install the Andbo skill into a harness (Claude Code, OpenClaw, Hermes, …) |
+| `andbo k8s render "<task>" [--json]` | Render hardened Kubernetes manifests for one run — **never applies them** |
 | `andbo session list / show [id] / replay [id]` | Inspect recorded sessions |
 | `andbo doctor` | Diagnose local setup |
 | `andbo version` | Print version |
@@ -388,6 +389,82 @@ codex mcp add andbo -- andbo mcp serve
 gemini mcp add andbo andbo mcp serve
 ```
 
+## Kubernetes (render-only)
+
+`andbo k8s render` turns a task plus your policy into two manifests — a
+default-deny `NetworkPolicy` and a hardened `Job` that the policy selects — and
+writes them to stdout. **Andbo never applies them.** There is no kubeconfig, no
+cluster client, and no network call on this path; you review the YAML and apply
+it yourself.
+
+```bash
+andbo k8s render "fix failing tests" \
+  --name fix-tests --namespace andbo-runs \
+  --workspace empty > run.yaml
+
+# read it, then apply it yourself
+kubectl apply -f run.yaml
+```
+
+Two things that example does **not** do, and that no flag can make it do:
+
+- `--workspace empty` ships **no repository**. The pod's working directory is an
+  empty volume, on purpose. To send code, bake it into your agent image and pass
+  `--workspace image:/path` (below).
+- Andbo does not put an agent in the pod. The Job runs whatever your policy's
+  `agent.*` resolves to — with the shipped default that is `echo "<task>"` — from
+  `runtime.image`. A real agent must be baked into that image, exactly as for
+  [containerized runs](#run-an-agent-fully-containerized-baked-in-agents).
+
+| Flag | Meaning |
+|---|---|
+| `--name` | Job name; also the label the `NetworkPolicy` selects on (DNS-1123 label) |
+| `--namespace` | An **existing** namespace dedicated to agent runs; Andbo does not create it |
+| `--workspace empty` \| `image:/path` | How the workspace reaches the pod. Required — there is no default |
+| `--runtime-class`, `--service-account` | Optional; rendered only when given (token automount stays off) |
+| `--policy`, `--json` | As elsewhere |
+| `--agent` | As elsewhere, **except** agents that need environment of their own (`goose` sets `GOOSE_MODE`) are refused — see below |
+
+`--workspace image:/path` costs an image build **per run**: the init container
+that copies the workspace in uses your `runtime.image` with
+`imagePullPolicy: Always`, so the repository has to be a layer of that image at
+`/path`, rebuilt and pushed for every task. Anyone who can pull the image can
+read the workspace, so keep it private and never bake credentials into it.
+
+What the rendered Job guarantees: non-root with a numeric UID,
+`readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, `privileged: false`,
+capabilities dropped to `ALL`, seccomp `RuntimeDefault`,
+`automountServiceAccountToken: false`, `enableServiceLinks: false`, no host
+namespaces, no `hostPath` (size-limited `emptyDir` is the only volume source),
+required CPU/memory requests and limits, `HOME` pointed at the writable volume
+(the root filesystem is read-only), and a bounded `ttlSecondsAfterFinished` and
+`activeDeadlineSeconds` — the latter from `budget.max_runtime_minutes`, or 1800s
+when that is `0`. (`andbo run` reads `0` as "no deadline"; a pod nobody is
+supervising always gets one.) Rendering is deterministic, so the same inputs
+produce a byte-identical manifest you can diff and pin.
+
+Where it fails closed instead of downgrading — all of these exit **2**:
+`network.mode` `allowlist` and `open` are **rejected** (NetworkPolicy selects by
+IP/namespace/pod, not by domain — use the container runtime for allowlisted
+egress), as are `runtime.isolation: local`, `budget.max_runtime_minutes` above
+the 1440-minute cap, host bind mounts, an agent that needs its own environment,
+and any host environment variable. `secrets.allow` names are never inlined into a
+manifest; an allowlisted name that is actually set on your machine **stops the
+render** rather than being silently dropped — except `PATH`, `LANG`, `LC_ALL` and
+`TERM`, which are always dropped without comment because the image supplies them.
+A manifest that is simply invalid (bad `--name`, reserved `--namespace`, a
+workspace path the volume would mask) exits **7** instead, with each manifest
+field mapped back to the flag or policy field that produced it.
+
+A `--policy` you name must exist: a mistyped path would otherwise fall back to
+the built-in defaults and quietly render the floating-tag default image in place
+of whatever digest you pinned. With no `--policy` and no `andbo.yaml`, the
+defaults are used and the summary says so.
+
+The command prints its full "not enforced" list to stderr on every run — the
+CNI dependency, the additive nature of NetworkPolicies, and the fact that a
+workspace baked into an image is not sanitized by `filesystem.deny`. Read it.
+
 ## Recipes
 
 Step-by-step guides live in [`recipes/`](recipes/) — each built from features
@@ -518,6 +595,11 @@ gh attestation verify oci://ghcr.io/qosikz/andbo/runtime:latest --repo qosikz/an
 - The published default runtime image is a minimal base (Debian + `git` +
   `ca-certificates`); agents needing other toolchains require a custom image.
 - Secret redaction is best-effort and may miss unknown formats.
+- `andbo k8s render` renders manifests only: it never contacts a cluster, so it
+  runs no agent, records no session, produces no diff, and copies nothing back
+  out of the pod. The default-deny `NetworkPolicy` is inert unless your CNI
+  implements NetworkPolicy, and it cannot subtract from another policy that also
+  selects the pod.
 
 ## Development
 

@@ -572,6 +572,41 @@ func TestSecurity_WorkspaceCopyCarriesNoPreserveFlag(t *testing.T) {
 // which is only latent because Validate rejects a "/" source before reaching
 // here. Relying on a guard elsewhere for correctness here is how that guard
 // gets removed later as redundant.
+// A plain substring test misreports every path that merely shares a prefix with
+// the workspace. That was harmless while the only caller passed a long, unique
+// session directory, but `andbo k8s render` takes the workspace from the
+// caller's working directory, which can be short and ordinary.
+func TestNamesPath(t *testing.T) {
+	cases := []struct {
+		s, p string
+		want bool
+	}{
+		// Real references — every one of these must still be caught.
+		{"/tmp/w", "/tmp/w", true},
+		{"/tmp/w/file.go", "/tmp/w", true},
+		{"look in /tmp/w now", "/tmp/w", true},
+		{"--dir=/tmp/w/src", "/tmp/w", true},
+		{"\"/tmp/w\"", "/tmp/w", true},
+		{"/tmp/w:/tmp/w", "/tmp/w", true},
+		// Different paths that merely share characters.
+		{"/tmp/workspace", "/tmp/w", false},
+		{"/tmp/w2/file", "/tmp/w", false},
+		{"/x/tmp/w", "/tmp/w", false},
+		{"/tmp/w-backup", "/tmp/w", false},
+		{"/tmp/w.old", "/tmp/w", false},
+		{"", "/tmp/w", false},
+		// A second occurrence still counts when the first one does not.
+		{"/tmp/workspace and /tmp/w", "/tmp/w", true},
+		// An empty workspace path refers to nothing.
+		{"anything", "", false},
+	}
+	for _, tc := range cases {
+		if got := namesPath(tc.s, tc.p); got != tc.want {
+			t.Errorf("namesPath(%q, %q) = %v, want %v", tc.s, tc.p, got, tc.want)
+		}
+	}
+}
+
 func TestPathsOverlap(t *testing.T) {
 	tests := []struct {
 		a, b string

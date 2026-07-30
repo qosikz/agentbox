@@ -164,11 +164,11 @@ func mapWorkspace(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpec) 
 	// This bounds the claim to the WORKSPACE path. Some other host path a caller
 	// puts in argv (say a home-directory binary) still crosses; the renderer has
 	// no model of the host layout to recognise it.
-	if strings.Contains(cs.Executable, host) {
+	if namesPath(cs.Executable, host) {
 		return "", fmt.Errorf("command executable %q is inside the host workspace %q, which does not exist in a Kubernetes pod; name the executable as it is installed in the image, or as a path under the pod working directory %q", cs.Executable, host, base.WorkingDir)
 	}
 	for i, arg := range cs.Args {
-		if strings.Contains(arg, host) {
+		if namesPath(arg, host) {
 			return "", fmt.Errorf("command args[%d] names the host workspace path %q, which would leak the host's username and directory layout into a manifest applied to a shared cluster — and points at a directory the pod does not have; refer to the workspace by its pod path %q instead", i, host, base.WorkingDir)
 		}
 	}
@@ -182,6 +182,52 @@ func mapWorkspace(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpec) 
 	}
 
 	return host, nil
+}
+
+// namesPath reports whether s refers to the path p, rather than merely
+// containing its characters.
+//
+// A plain substring test is wrong here. It was harmless while the only caller
+// passed a long, unique session directory, but `andbo k8s render` takes the
+// workspace from the operator's working directory, which can be short and
+// ordinary: from /tmp/w, every mention of an unrelated /tmp/workspace was
+// reported as a host-path leak, refusing the run with an explanation that was
+// not true — and a CI checkout at /src or /work made the image transport
+// unusable outright.
+//
+// A match counts only at path-segment boundaries on both sides: the character
+// before it must not extend the first segment backwards, and the character
+// after it must not extend the last segment forwards. So "/tmp/w" matches
+// "/tmp/w", "/tmp/w/file", and "see /tmp/w now", but not "/tmp/workspace",
+// "/tmp/w2", or "/x/tmp/w". Bytes outside the segment set — including every
+// non-ASCII byte — count as boundaries, so the check stays conservative.
+func namesPath(s, p string) bool {
+	if p == "" {
+		return false
+	}
+	for i := 0; i+len(p) <= len(s); {
+		j := strings.Index(s[i:], p)
+		if j < 0 {
+			return false
+		}
+		start := i + j
+		if !pathSegmentByte(s, start-1) && !pathSegmentByte(s, start+len(p)) {
+			return true
+		}
+		i = start + 1
+	}
+	return false
+}
+
+// pathSegmentByte reports whether the byte at index i continues a path segment.
+// Indices outside s are boundaries.
+func pathSegmentByte(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return false
+	}
+	c := s[i]
+	return c == '-' || c == '.' || c == '_' ||
+		('0' <= c && c <= '9') || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
 }
 
 // containerHygieneEnv are the names internal/cli injects into every non-local

@@ -5,6 +5,44 @@ All notable changes to Andbo are documented here.
 ## Unreleased
 
 ### Added
+- **Kubernetes runner, slice 1: `andbo k8s render` CLI surface.** The renderer
+  from slice 0 is now reachable: `andbo k8s render "<task>" --name <job>
+  --namespace <ns> --workspace <empty|image:PATH>` loads your policy, builds the
+  agent command through the normal adapter, crosses the `FromRuntimeSpec`
+  boundary, and writes the two-document manifest to **stdout** so it composes
+  (`| kubectl apply -f -`). Everything else — the summary and the full
+  "not enforced" list — goes to stderr. `--json` emits the manifest plus every
+  note as one object.
+
+  It **renders only**: no kubeconfig is read, no cluster client exists in
+  `go.mod` (asserted by a test), no agent runs, no session is recorded, and
+  nothing is applied. `budget.max_runtime_minutes` becomes
+  `activeDeadlineSeconds` (and `0` keeps the renderer's bounded 1800s default
+  rather than meaning "no deadline" as it does for `andbo run` — a pod nobody
+  supervises always gets one). `--workspace` has no default, because an emptyDir
+  makes "workspace lost" and "workspace never declared" render identically.
+
+  Fail-closed, never downgraded — all exit `2`: `network.mode` `allowlist`/`open`,
+  `runtime.isolation: local`, `budget.max_runtime_minutes` above the cap (bounded
+  in **minutes**, before the conversion to a duration that overflows), and an
+  agent that needs environment variables of its own (`goose` sets `GOOSE_MODE`;
+  nothing but `HOME` crosses into a Job) are each rejected with an error naming
+  where the workload *can* run. A `--policy` path that does not exist is an error
+  rather than a silent fall-back to built-in defaults, which would have swapped
+  the floating-tag default image for a pinned digest under a summary claiming the
+  named policy had been applied. `HOME` is set to the writable volume for both
+  workspace transports, since the pod root filesystem is read-only. A
+  `secrets.allow` name that is actually set in the host environment **stops the
+  render** rather than being dropped or inlined into a plain-text manifest — the
+  exception being `PATH`, `LANG`, `LC_ALL` and `TERM`, which are always dropped
+  because the image supplies them. An invalid manifest exits `7`, with manifest
+  field names mapped back to the flag or policy field that produced them.
+
+  Four CLI-layer enforcement notes were added alongside the renderer's own,
+  covering what this command does not do — in particular that `filesystem.deny`
+  cannot sanitize a workspace baked into an image, since Andbo never copies one.
+  `SECURITY.md` now states the Kubernetes boundary: everything in the rendered
+  manifests is enforced by your cluster, not by Andbo.
 - **Kubernetes runner, slice 0: hardened manifest rendering contract**
   (`internal/runtime/k8s`). Renders a batch/v1 Job plus a default-deny
   `NetworkPolicy` that selects that Job's pod, for an external scheduler (or a
@@ -36,6 +74,18 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **Kubernetes renderer: host-workspace leak check matched substrings, not
+  paths.** `FromRuntimeSpec` refused any argv containing the workspace path, via
+  `strings.Contains`. That was harmless while the only caller passed a long,
+  unique session directory, but `andbo k8s render` takes the workspace from the
+  operator's working directory: from `/tmp/w`, every mention of an unrelated
+  `/tmp/workspace` was reported as a host-path leak with an explanation that was
+  not true, and a CI checkout at `/src` or `/work` made the image transport
+  unusable. Matching is now anchored to path-segment boundaries on both sides;
+  every real reference is still caught.
+- **Kubernetes renderer: validation errors gave Go API advice to CLI users.**
+  The trailing line said "Start from DefaultJobSpec() for secure defaults", which
+  nobody can act on from a terminal now that `andbo k8s render` surfaces these.
 - **Kubernetes renderer: `workingDir` reserved-path bypass.** The reserved
   mount-path check compared raw strings, so a non-canonical spelling such as
   `/work/../etc` walked past it while the kernel still resolved the mount to

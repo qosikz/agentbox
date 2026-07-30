@@ -48,6 +48,8 @@ func (r *Root) Run(args []string) error {
 		return r.cmdSession(args[1:])
 	case "mcp":
 		return r.cmdMCP(args[1:])
+	case "k8s":
+		return r.cmdK8s(args[1:])
 	case "skill":
 		return r.cmdSkill(args[1:])
 	case "shell":
@@ -80,6 +82,7 @@ Commands:
   policy check               Validate policy and show the effective configuration
   mcp scan <path>            Statically scan an MCP server for dangerous capabilities
   mcp serve                  Serve Andbo sandbox tools over MCP (stdio)
+  k8s render "<task>"        Render hardened Kubernetes manifests (never applies them)
   skill install              Install the Andbo skill into an agent harness
   session list               List recorded sessions
   session show [id|latest]   Show a session record
@@ -93,6 +96,7 @@ Examples:
   andbo run github.com/org/repo --task "add tests" --open-pr
   andbo run "refactor parser" --network deny --write ./src --write ./tests
   andbo mcp scan ./mcp-server
+  andbo k8s render "add tests" --name add-tests --namespace andbo-runs --workspace empty
 
 Unsafe modes (--network open, --runtime local, --allow-host-home,
 --allow-docker-socket) require explicit confirmation or --yes-unsafe in CI.
