@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/qosikz/andbo/internal/config"
 	"github.com/qosikz/andbo/internal/policy"
@@ -23,6 +24,16 @@ func (r *Root) cmdPolicy(args []string) error {
 	}
 	check := cfg.Check()
 	ep := policy.BuildEffectivePolicy(cfg, path, policy.Overrides{})
+
+	// This command is the gate a pipeline runs BEFORE anything executes, so a
+	// budget `andbo run`/`andbo exec` will refuse has to be an error here too.
+	// Reporting the policy valid and then dying on the first real run is the
+	// same silent gap between surfaces that checkBudgetMinutes exists to close.
+	// It is reported through check.Errors so it reaches --json and the human
+	// output alike, under this command's own invalid-policy exit code.
+	if err := checkBudgetMinutes(ep.Budget.MaxRuntimeMinutes, path); err != nil {
+		check.Errors = append(check.Errors, err.Error())
+	}
 
 	if jsonOut {
 		out := map[string]any{
@@ -50,7 +61,9 @@ func (r *Root) cmdPolicy(args []string) error {
 	if len(check.Errors) > 0 {
 		fmt.Println("Errors:")
 		for _, e := range check.Errors {
-			fmt.Printf("  ✗ %s\n", e)
+			// Errors are multi-line when they carry a fix; indent the
+			// continuation so it stays visibly part of the same bullet.
+			fmt.Printf("  ✗ %s\n", strings.ReplaceAll(e, "\n", "\n    "))
 		}
 		fmt.Println()
 	}

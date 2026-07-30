@@ -50,11 +50,20 @@ const maxBudgetMinutes = int(math.MaxInt64 / int64(time.Minute))
 // budgetWindow converts budget.max_runtime_minutes into the run deadline.
 // It is a variable so tests can shrink the window to milliseconds.
 //
-// The clamp is unreachable through the commands, which refuse an oversized
-// budget up front (checkBudgetMinutes). It stays because the conversion must be
-// total: a caller added later gets the longest window that can be held, never a
-// wrapped one.
+// Neither guard is reachable through the commands: they gate on `> 0` and
+// refuse an oversized budget up front (checkBudgetMinutes). Both stay because
+// the conversion must be total for a caller added later — which is exactly how
+// run and exec came to differ from k8s render.
+//
+// The negative half matters as much as the positive one, and wraps the wrong
+// way: -9007199254740991 minutes multiplies out to a plausible ONE-MINUTE
+// window, which passes the runners' `Timeout > 0` gate and so reads as
+// enforced. At or below zero is how the policy spells "no deadline", so that is
+// what the conversion returns.
 var budgetWindow = func(minutes int) time.Duration {
+	if minutes <= 0 {
+		return 0
+	}
 	if minutes > maxBudgetMinutes {
 		return time.Duration(maxBudgetMinutes) * time.Minute
 	}

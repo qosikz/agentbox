@@ -493,9 +493,10 @@ A few runtime knobs worth knowing:
 - `runtime.engine: docker | podman` selects the container engine (or use
   `--engine` per run).
 - `budget.max_runtime_minutes` is enforced as a hard deadline on real runs —
-  the agent is stopped when it expires (dry-run is unaffected). `0` means no
-  deadline. Values above 153722867 (the largest a nanosecond deadline can hold)
-  are refused with exit `2` rather than converted into some other window.
+  the agent is stopped when it expires (dry-run is unaffected). `0` — or any
+  value below it — means no deadline at all. Values above 153722867 (the largest
+  a nanosecond deadline can hold) are refused by `run`, `exec`, and
+  `policy check` rather than converted into some other window.
 - `runtime.cleanup` is honored: the disposable workspace copy is removed after
   the run; set `cleanup: false` to keep it for debugging. Session artifacts
   under `.andbo/sessions/` are always kept.

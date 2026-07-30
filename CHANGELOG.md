@@ -89,9 +89,18 @@ All notable changes to Andbo are documented here.
   — the same policy-violation code `k8s render` uses for a budget it cannot bound
   — naming the value, the maximum, and the file to change. The refusal lands
   before the unsafe confirmation, so nobody is asked to accept risk for a run that
-  cannot start. The conversion itself was also made total, so no future caller can
-  obtain a wrapped window. `0` (or below) still means "no deadline" for `run` and
-  `exec`, unchanged.
+  cannot start. `andbo policy check` reports the same budget as an error (under
+  its own exit `7`), so the gate a pipeline runs *before* a run no longer passes a
+  policy the run will reject.
+
+  The conversion itself was made total in both directions. The negative half
+  wrapped too, and wrapped the wrong way: `-9007199254740991` minutes multiplied
+  out to a plausible **one-minute** window, which passes the runners' `Timeout > 0`
+  gate and so reads as enforced. `0` — or any value below it — is how the policy
+  spells "no deadline", so that is now exactly what the conversion returns.
+  Unreachable through the commands, which gate on `> 0`; it is there so a call
+  site added later cannot resurrect the defect, which is how `run` and `exec` came
+  to differ from `k8s render` in the first place.
 - **Kubernetes renderer: host-workspace leak check matched substrings, not
   paths.** `FromRuntimeSpec` refused any argv containing the workspace path, via
   `strings.Contains`. That was harmless while the only caller passed a long,

@@ -75,13 +75,29 @@ func TestBudgetWindowIsTotal(t *testing.T) {
 		{"wraps to a few seconds", 153722867281},
 		{"wraps negative", 200000000000},
 		{"the largest int64", math.MaxInt64},
+		// The negative half wraps too, and wraps POSITIVE — the direction that
+		// survives the runners' `Timeout > 0` gate and so reads as enforced.
+		// -2^53+1 is the sharpest: it produces a plausible one-minute window.
+		{"a negative budget", -1},
+		{"a negative budget wrapping positive", -153722868},
+		{"a negative budget wrapping to a plausible minute", -9007199254740991},
+		{"the smallest int64", math.MinInt64},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.minutes > math.MaxInt32 && strconv.IntSize < 64 {
+			if (tc.minutes > math.MaxInt32 || tc.minutes < math.MinInt32) && strconv.IntSize < 64 {
 				t.Skip("this budget does not fit in an int on this platform")
 			}
 			got := budgetWindow(int(tc.minutes))
+			if tc.minutes <= 0 {
+				// At or below zero is how the policy spells "no deadline", and
+				// every caller gates on `> 0`. The conversion must say exactly
+				// that, not a window arithmetic invented out of a sign flip.
+				if got != 0 {
+					t.Fatalf("budgetWindow(%d) = %v, want 0; a non-positive budget means no deadline", tc.minutes, got)
+				}
+				return
+			}
 			if tc.minutes <= int64(maxBudgetMinutes) {
 				if want := time.Duration(tc.minutes) * time.Minute; got != want {
 					t.Fatalf("budgetWindow(%d) = %v, want %v", tc.minutes, got, want)
@@ -173,6 +189,25 @@ func TestNonPositiveBudgetStillMeansNoDeadline(t *testing.T) {
 			r := NewRoot("test", "none", "now")
 			if err := r.cmdRun(context.Background(), []string{"fix failing tests", "--dry-run"}); err != nil {
 				t.Fatalf("max_runtime_minutes=%s means no deadline and must be accepted: %v", minutes, err)
+			}
+		})
+	}
+}
+
+// `andbo policy check` is the gate a pipeline runs BEFORE anything executes, so
+// a budget run and exec will refuse has to be an error there too. Reporting the
+// policy valid and then dying on the first real run is the failure this whole
+// slice is about, one step earlier.
+func TestPolicyCheckRefusesABudgetRunCannotEnforce(t *testing.T) {
+	for _, tc := range budgetOverflowCases {
+		t.Run(tc.name, func(t *testing.T) {
+			budgetProject(t, tc.minutes)
+			r := NewRoot("test", "none", "now")
+			err := r.cmdPolicy([]string{"check"})
+			// policy check keeps its own contract for an invalid policy (exit 7);
+			// what must not happen is a clean bill of health.
+			if CodeFor(err) != ExitInvalidConfig {
+				t.Fatalf("exit code = %d, want %d (err=%v)", CodeFor(err), ExitInvalidConfig, err)
 			}
 		})
 	}
