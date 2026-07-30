@@ -271,8 +271,12 @@ func TestK8sRenderNeverLeaksHostPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	for _, host := range []string{dir, os.Getenv("HOME"), os.TempDir()} {
-		if host == "" || host == "/" {
+	// Sentinels must be paths that identify THIS machine. os.TempDir() is not
+	// one: on Linux it is "/tmp", which the pod legitimately mounts as its
+	// scratch volume, so asserting its absence fails on a correct manifest. The
+	// project directory below already sits under it and is specific.
+	for _, host := range []string{dir, os.Getenv("HOME")} {
+		if host == "" || host == "/" || strings.HasPrefix("/work", host) || strings.HasPrefix("/tmp", host) {
 			continue
 		}
 		if strings.Contains(out, host) {
