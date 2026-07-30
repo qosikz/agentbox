@@ -193,9 +193,11 @@ andbo run "fix failing tests" --dry-run        # plan only; no Docker needed
 andbo mcp scan ./path-to-mcp-server            # exit 2 if unsafe
 ```
 
-`andbo doctor` checks your local setup (Docker, git, gh, known agents) and
-reports whether `andbo.yaml` is one the other commands will accept. It
-diagnoses only — it always exits `0`; `andbo policy check` is the gate.
+`andbo doctor` checks your local setup (Docker, git, gh, known agents) and runs
+the same policy validation `andbo policy check` does, so a broken `andbo.yaml`
+is named there rather than turning up later as a failed run. It diagnoses only —
+it always exits `0`; `andbo policy check` is the gate, and
+[`andbo k8s render`](#kubernetes-render-only) refuses more still.
 
 ### Two ways to start
 
