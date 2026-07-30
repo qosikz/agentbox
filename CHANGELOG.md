@@ -74,6 +74,26 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **`andbo doctor` reported `config: ✓ andbo.yaml valid` for policies every
+  other command refuses.** It only asked whether the YAML decoded, so a
+  `network.mode: bogus`, a `secrets.mode: env`, an empty `runtime.image`, or a
+  budget outside the enforceable range each passed doctor and were then rejected
+  with exit `7` by `policy check`, `run`, `exec`, and `k8s render`. Doctor is the
+  command a user reaches for *after* a run fails, and its verdict sent them
+  looking at Docker, at their agent, at anything but the file that was broken.
+
+  Doctor now runs the same validation those surfaces do — `config.Check` for
+  malformed values, plus the upper bound on `budget.max_runtime_minutes` that
+  `policy check`/`run`/`exec` apply — and reports `config` as failing, naming
+  every field to fix on one line.
+
+  It still **diagnoses rather than gates**: `andbo doctor` exits `0` exactly as
+  before, including on an invalid policy, so a setup script that runs it before
+  `andbo init` does not start failing. No other command's validation changed, and
+  the Kubernetes manifest contract is untouched. What is asserted is *agreement*:
+  a rule added to `config.Check` later cannot drift away from doctor again
+  without turning the test red.
+
 - **A negative `budget.max_runtime_minutes` meant something different on every
   surface, and none of them was the bound it asked for.** A sign typo on the
   default budget — `-30` where `30` was meant — validated clean and then took

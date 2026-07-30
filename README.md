@@ -193,7 +193,9 @@ andbo run "fix failing tests" --dry-run        # plan only; no Docker needed
 andbo mcp scan ./path-to-mcp-server            # exit 2 if unsafe
 ```
 
-`andbo doctor` checks your local setup (Docker, git, gh, known agents).
+`andbo doctor` checks your local setup (Docker, git, gh, known agents) and
+reports whether `andbo.yaml` is one the other commands will accept. It
+diagnoses only — it always exits `0`; `andbo policy check` is the gate.
 
 ### Two ways to start
 
