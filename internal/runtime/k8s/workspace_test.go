@@ -537,6 +537,36 @@ func TestFromRuntimeSpec_WorkspaceFailsClosed(t *testing.T) {
 	}
 }
 
+// TestSecurity_WorkspaceCopyCarriesNoPreserveFlag guards the one invariant the
+// rest of this suite structurally cannot: nothing here executes cp, so a copy
+// that fails on every real cluster still renders and still passes.
+//
+// kubelet leaves the emptyDir's root owned by uid 0 (fsGroup changes only the
+// group), and any preserve flag makes coreutils fatal when it cannot write that
+// directory's metadata — which needs ownership, not write permission. `cp -a`
+// therefore copies every file and exits 1, and the failed init container takes
+// the whole Job down. Reintroducing a preserve flag is the specific regression
+// worth failing loudly on.
+func TestSecurity_WorkspaceCopyCarriesNoPreserveFlag(t *testing.T) {
+	s := validSpec()
+	s.WorkspaceTransport = WorkspaceFromImage
+	s.ImageWorkspacePath = imageWorkspaceSrc
+
+	inits := s.initContainers()
+	if len(inits) != 1 {
+		t.Fatalf("initContainers() = %d containers, want 1", len(inits))
+	}
+
+	for _, arg := range inits[0].Args {
+		if !strings.HasPrefix(arg, "-") || arg == "--" {
+			continue // an operand, not a flag
+		}
+		if strings.Contains(arg, "preserve") || strings.Contains(arg, "a") {
+			t.Errorf("workspace copy flag %q preserves metadata; cp then exits non-zero because the emptyDir root is owned by uid 0, and the failed init container fails the Job", arg)
+		}
+	}
+}
+
 // TestPathsOverlap covers the containment test the masking checks rely on,
 // including "/" — which the string form gets wrong (b+"/" becomes "//"), and
 // which is only latent because Validate rejects a "/" source before reaching
