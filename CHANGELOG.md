@@ -74,6 +74,39 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **`andbo doctor` reported `config: ✓ andbo.yaml valid` for policies every
+  other command refuses.** It only asked whether the YAML decoded, so a
+  `network.mode: bogus`, a `secrets.mode: env`, an empty `runtime.image`, or a
+  negative budget each passed doctor and were then rejected as an invalid policy
+  (exit `7`) by `policy check`, `run`, `exec`, and `k8s render` — as was a budget
+  above what a run deadline can hold, which `policy check` reports under that
+  same exit `7` while `run`, `exec`, and `k8s render` refuse it as a policy
+  violation (exit `2`). Doctor is the command a user reaches for *after* a run
+  fails, and its verdict sent them looking at Docker, at their agent, at anything
+  but the file that was broken.
+
+  Doctor now runs the validation `andbo policy check` runs — `config.Check` for
+  malformed values, plus the upper bound on `budget.max_runtime_minutes` — and
+  reports `config` as failing, naming every field to fix on one line.
+
+  It still **diagnoses rather than gates**: `andbo doctor` exits `0` exactly as
+  before, including on an invalid policy, so a setup script that runs it before
+  `andbo init` does not start failing. No other command's validation changed, and
+  the Kubernetes manifest contract is untouched. What is asserted is *agreement*:
+  a rule added to `config.Check` later cannot drift away from doctor again
+  without turning the test red.
+
+  Doctor's verdict is `andbo policy check`'s, no wider. `andbo k8s render`
+  refuses policies that are perfectly valid for `andbo run` — a budget above the
+  1440-minute `activeDeadlineSeconds` cap, `runtime.isolation: local`,
+  `network.mode` allowlist/open, an agent needing environment variables — and
+  doctor deliberately does not report those: it is host-local and target-agnostic,
+  and flagging them would make it cry wolf on the path most people are on. An
+  `agent.default` naming an adapter that does not exist is likewise still
+  reported valid, by `policy check` and doctor alike; `run` and `k8s render`
+  refuse it at exit `4`. Closing that one belongs in the shared validation, not
+  in doctor alone.
+
 - **A negative `budget.max_runtime_minutes` meant something different on every
   surface, and none of them was the bound it asked for.** A sign typo on the
   default budget — `-30` where `30` was meant — validated clean and then took

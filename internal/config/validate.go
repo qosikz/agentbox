@@ -98,10 +98,10 @@ func (p Policy) Check() CheckResult {
 	// Security: it is refused HERE, and not at each command, because Check is the
 	// one validation every surface that READS the budget funnels through — those
 	// four cannot drift apart again, which is exactly how they came to disagree
-	// in the first place. (`andbo doctor` reads a policy without calling Check,
-	// but never reads the budget; it reports parseability only.) Zero keeps its
-	// documented meaning of "no deadline"; only below zero is refused, because
-	// that is the value no reading of the policy can honour.
+	// in the first place. (`andbo doctor` runs Check too, and reports what it
+	// says; it gates nothing.) Zero keeps its documented meaning of "no
+	// deadline"; only below zero is refused, because that is the value no
+	// reading of the policy can honour.
 	//
 	// Single-line, like every error here: run, exec, and k8s render print these
 	// with warn(), which renders the string flat, so a newline would land as an

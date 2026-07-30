@@ -17,6 +17,39 @@ type doctorCheck struct {
 	Detail string `json:"detail"`
 }
 
+// policyIssues returns the reasons the other surfaces refuse this policy, as
+// single-line strings.
+//
+// A policy that parses is not a policy that runs. `andbo doctor` asked only
+// whether the YAML decoded, so it reported `config: ✓ andbo.yaml valid` for
+// files that `policy check`, `run`, `exec`, and `k8s render` all refuse — and
+// doctor is precisely what a user runs when a run has just failed. Both halves
+// of that refusal are consulted here, because they live apart: config.Check
+// covers malformed values, and checkBudgetMinutes covers a budget too large to
+// become a run deadline.
+//
+// Budget is read straight off the file's policy. policy.BuildEffectivePolicy
+// copies Budget through unchanged and doctor has no flags to override it with,
+// so building an effective policy would only add a dependency, not a different
+// answer.
+//
+// This reports; it does not gate. Doctor stays a diagnostic that exits 0, and
+// no other command's validation changes — the point is that doctor's verdict
+// agrees with theirs, not that doctor becomes a fifth gate.
+func policyIssues(cfg config.Policy, path string) []string {
+	issues := cfg.Check().Errors
+	if err := checkBudgetMinutes(cfg.Budget.MaxRuntimeMinutes, path); err != nil {
+		issues = append(issues, err.Error())
+	}
+	// Doctor prints one aligned line per check. An error carrying its fix on a
+	// second line (the budget one does) would land under the table with no
+	// check name against it, reading as stray prose.
+	for i, s := range issues {
+		issues[i] = strings.ReplaceAll(s, "\n", " ")
+	}
+	return issues
+}
+
 func (r *Root) cmdDoctor(args []string) error {
 	jsonOut := hasFlag(args, "--json")
 	var checks []doctorCheck
@@ -35,8 +68,12 @@ func (r *Root) cmdDoctor(args []string) error {
 
 	// Config file.
 	if _, err := os.Stat("andbo.yaml"); err == nil {
-		if _, lerr := config.LoadPolicy("andbo.yaml"); lerr != nil {
+		cfg, lerr := config.LoadPolicy("andbo.yaml")
+		if lerr != nil {
 			checks = append(checks, doctorCheck{"config", false, "andbo.yaml present but invalid"})
+		} else if issues := policyIssues(cfg, "andbo.yaml"); len(issues) > 0 {
+			checks = append(checks, doctorCheck{"config", false,
+				"andbo.yaml is invalid: " + strings.Join(issues, "; ") + " — run 'andbo policy check'"})
 		} else {
 			checks = append(checks, doctorCheck{"config", true, "andbo.yaml valid"})
 		}
