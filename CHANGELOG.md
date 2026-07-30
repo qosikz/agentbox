@@ -95,8 +95,15 @@ All notable changes to Andbo are documented here.
   The check lives in `config.Check` rather than in each command, because that is
   the one validation all four surfaces already funnel through: the same four
   cannot drift apart again, which is how they came to disagree here in the first
-  place. It bounds only the bottom of the range — the top stays with
-  `checkBudgetMinutes`, where the refusal has to name the representable maximum.
+  place. Putting it beside the existing upper-bound guard would not have worked —
+  `k8s render` never calls that one, so the surface with the worst symptom would
+  have kept it.
+
+  It bounds only the bottom of the range; the top stays where it is, for two
+  reasons worth writing down. `Check` is a method on the policy and does not know
+  which file the policy came from, so it cannot say "lower it in andbo.yaml" the
+  way the upper-bound refusal does — which is also why the message below names no
+  file. And moving that guard would change a shipped exit code from `2` to `7`.
 - **`andbo run` / `andbo exec`: `budget.max_runtime_minutes` overflowed into a
   window the policy never asked for.** The conversion to a deadline multiplied
   minutes by `time.Minute` unguarded. A `time.Duration` counts nanoseconds in an

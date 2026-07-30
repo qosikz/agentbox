@@ -221,21 +221,23 @@ func TestZeroBudgetStillMeansNoDeadline(t *testing.T) {
 	}
 }
 
-// negativeBudgetCases name a wall-clock bound no clock can reach. -30 is the
-// shape that matters most — a sign typo on the default budget, which reads as
-// "30 minutes" to everyone but the code. -9007199254740991 is the sharpest:
-// naively converted it wraps POSITIVE into a plausible one-minute window, the
-// direction that passes the runners' `Timeout > 0` gate and so reads as
-// enforced.
-var negativeBudgetCases = []string{"-1", "-30", "-9007199254740991"}
-
-// budgetSurfaces are the commands that read budget.max_runtime_minutes. Each
-// returns what the USER can see alongside the error, because the surfaces put
-// it in different places: policy check reports on stdout, run and exec warn on
-// stderr and return only a pointer to 'andbo policy check', and k8s render
-// writes diagnostics to its own stderr stream.
-func budgetSurfaces() map[string]func(*testing.T) (string, error) {
-	return map[string]func(*testing.T) (string, error){
+// A negative budget is not a duration, and every surface used to read it
+// differently: run and exec gate the deadline on `> 0` and so ran with NO
+// deadline at all, k8s render gated the same way and fell through to the
+// renderer's 1800s activeDeadlineSeconds default, and policy check called both
+// of those policies valid. One value, three meanings, no error anywhere.
+//
+// -30 is the case that matters most — a sign typo on the default budget, which
+// reads as "30 minutes" to everyone but the code. -9007199254740991 is the
+// sharpest: naively converted it wraps POSITIVE into a plausible one-minute
+// window, the direction that passes the runners' `Timeout > 0` gate and so
+// reads as enforced.
+func TestEverySurfaceRefusesANegativeBudget(t *testing.T) {
+	// Each surface yields only its DIAGNOSTIC text, because they put it in
+	// different places: policy check reports on stdout, run and exec warn on
+	// stderr and return only a pointer to 'andbo policy check', and k8s render
+	// writes to its own stderr stream.
+	surfaces := map[string]func(*testing.T) (string, error){
 		"run": func(t *testing.T) (string, error) {
 			return captureStderr(t, func() error {
 				return NewRoot("test", "none", "now").cmdRun(context.Background(), []string{"fix failing tests", "--dry-run"})
@@ -247,9 +249,17 @@ func budgetSurfaces() map[string]func(*testing.T) (string, error) {
 			})
 		},
 		"policy check": func(t *testing.T) (string, error) {
-			return captureStdout(t, func() error {
+			out, err := captureStdout(t, func() error {
 				return NewRoot("test", "none", "now").cmdPolicy([]string{"check"})
 			})
+			// Narrowed to the error list on purpose. This command prints the
+			// effective policy first, and that block already echoes
+			// `minutes=-30` — so asserting the value against the whole report
+			// would stay green on a message that dropped it.
+			if i := strings.Index(out, "Errors:"); i >= 0 {
+				return out[i:], err
+			}
+			return out, err
 		},
 		"k8s render": func(t *testing.T) (string, error) {
 			out, errOut, err := runK8s(t, okArgs()...)
@@ -263,17 +273,22 @@ func budgetSurfaces() map[string]func(*testing.T) (string, error) {
 			return errOut, err
 		},
 	}
-}
 
-// A negative budget is not a duration, and every surface used to read it
-// differently: run and exec gate the deadline on `> 0` and so ran with NO
-// deadline at all, k8s render gated the same way and fell through to the
-// renderer's 1800s activeDeadlineSeconds default, and policy check called both
-// of those policies valid. One value, three meanings, no error anywhere.
-func TestEverySurfaceRefusesANegativeBudget(t *testing.T) {
-	for _, minutes := range negativeBudgetCases {
-		for name, invoke := range budgetSurfaces() {
+	for _, minutes := range []string{"-1", "-30", "-9007199254740991"} {
+		for name, invoke := range surfaces {
 			t.Run(minutes+"/"+name, func(t *testing.T) {
+				// Below int range the YAML decode fails before Check() ever sees
+				// the value, and LoadPolicy's error is RETURNED rather than
+				// warned — so the diagnostic stream would be empty for a reason
+				// that has nothing to do with this guard.
+				v, perr := strconv.ParseInt(minutes, 10, 64)
+				if perr != nil {
+					t.Fatalf("case %q is not an integer: %v", minutes, perr)
+				}
+				if (v > math.MaxInt32 || v < math.MinInt32) && strconv.IntSize < 64 {
+					t.Skip("this budget does not fit in an int on this platform")
+				}
+
 				budgetProject(t, minutes)
 				shown, err := invoke(t)
 				// A malformed value is an invalid policy, which is the exit code
@@ -447,8 +462,12 @@ func captureStream(t *testing.T, stream **os.File, fn func() error) (string, err
 	defer f.Close()
 	prev := *stream
 	*stream = f
+	// Deferred, not restored inline: a t.Fatal inside fn unwinds via
+	// runtime.Goexit, which would otherwise leave the real stream pointing at a
+	// TempDir file that is about to be deleted, silently swallowing the rest of
+	// the package's diagnostics.
+	defer func() { *stream = prev }()
 	err := fn()
-	*stream = prev
 	data, rerr := os.ReadFile(f.Name())
 	if rerr != nil {
 		t.Fatal(rerr)
