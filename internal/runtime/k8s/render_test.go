@@ -109,6 +109,21 @@ func TestRender_GoldenFull(t *testing.T) {
 	checkGolden(t, "full.golden.yaml", got)
 }
 
+// TestRender_GoldenImageWorkspace pins the workspace transport byte for byte:
+// the init container is the one place the renderer emits a command of its own,
+// so a change to its argv or its hardening must be a visible diff.
+func TestRender_GoldenImageWorkspace(t *testing.T) {
+	s := goldenSpec(t)
+	s.WorkspaceTransport = WorkspaceFromImage
+	s.ImageWorkspacePath = "/andbo/workspace"
+
+	got, err := s.Render()
+	if err != nil {
+		t.Fatalf("Render() = %v, want nil", err)
+	}
+	checkGolden(t, "image-workspace.golden.yaml", got)
+}
+
 func TestRender_IsDeterministic(t *testing.T) {
 	s := goldenSpec(t)
 	s.Env = map[string]string{"Z": "1", "A": "2", "M": "3", "B": "4", "Q": "5"}

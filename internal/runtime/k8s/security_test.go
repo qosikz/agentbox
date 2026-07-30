@@ -215,8 +215,11 @@ func TestSecurity_HostEnvIsNeverBridged(t *testing.T) {
 // TestSecurity_HostWorkdirIsNeverBridged covers the same class as the host
 // mount rejection: RuntimeSpec.Workdir is a HOST path (buildRuntimeSpec sets it
 // to the workspace copy, meaningful in Docker only because of the bind mount
-// this renderer refuses). Keeping the path while dropping the mount would show
-// a reviewer a workspace path backed by an empty volume.
+// this renderer refuses). A workspace is accepted only when the JobSpec
+// declares how it reaches the pod, and even then the host path is remapped
+// rather than rendered — see TestFromRuntimeSpec_AcceptsTheRealWorkspaceShape.
+// With no transport declared it must fail rather than render a workspace path
+// backed by an empty volume.
 func TestSecurity_HostWorkdirIsNeverBridged(t *testing.T) {
 	rs := containerSpec()
 	rs.Workdir = "/Users/alice/.andbo/ws/abc123"

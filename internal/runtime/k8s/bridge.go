@@ -3,6 +3,7 @@ package k8s
 import (
 	"fmt"
 	"math"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -17,12 +18,12 @@ import (
 // It is a pure mapping with no cluster interaction, and its value is mostly in
 // what it REFUSES. Anything RuntimeSpec can express that this renderer cannot
 // enforce is a hard error, never a silent downgrade, so only these fields cross
-// the boundary: Image, NetworkMode, User, Executable, Args, and Timeout.
-// Everything host-derived — bind mounts, the host working directory, and the
-// resolved host environment — fails closed, because a Job has no access to the
-// host and this slice has no workspace or secret transport. On any error the
-// returned JobSpec is the zero value, so a caller that ignores the error cannot
-// render a spec that silently lost a control.
+// the boundary: Image, NetworkMode, User, Executable, Args, Timeout, and the
+// workspace (as a PATH REMAPPING — see mapWorkspace). Every other host-derived
+// value — extra bind mounts and the resolved host environment — fails closed,
+// because a Job has no access to the host and this slice has no secret
+// transport. On any error the returned JobSpec is the zero value, so a caller
+// that ignores the error cannot render a spec that silently lost a control.
 func FromRuntimeSpec(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpec) (JobSpec, error) {
 	out := base
 
@@ -32,36 +33,16 @@ func FromRuntimeSpec(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpe
 	if rs.MountDockerSocket {
 		return JobSpec{}, fmt.Errorf("runtime spec mounts the docker socket, which the Kubernetes renderer never emits (it grants control of the host daemon); remove it or run this workload on the container runtime")
 	}
-	if len(rs.ReadOnlyPaths) > 0 || len(rs.WritePaths) > 0 {
-		return JobSpec{}, fmt.Errorf("runtime spec mounts %d host path(s), which have no safe Kubernetes equivalent (a hostPath volume would expose the node filesystem); ship the workspace inside the image or fetch it in the container instead", len(rs.ReadOnlyPaths)+len(rs.WritePaths))
-	}
 
-	// RuntimeSpec.Workdir is a HOST path: the container runtime bind-mounts the
-	// workspace at the same path, which is the only reason it means anything
-	// there. This renderer refuses that mount, so keeping the path would show a
-	// reviewer a workspace directory backed by an empty volume — and would leak
-	// the host's username and layout into a manifest applied to a shared
-	// cluster. The pod working directory comes from JobSpec.WorkingDir instead.
-	if rs.Workdir != "" {
-		return JobSpec{}, fmt.Errorf("runtime spec sets host working directory %q; a Kubernetes Job cannot reach the host filesystem, so set the pod working directory on the JobSpec (default %q) and leave RuntimeSpec.Workdir empty", rs.Workdir, DefaultWorkingDir)
+	hostWorkspace, err := mapWorkspace(out, rs, cs)
+	if err != nil {
+		return JobSpec{}, err
 	}
-	// CommandSpec.WorkingDir is likewise a host directory (the local runner
-	// chdirs into it, and every adapter sets it to the workspace path).
-	if cs.WorkingDir != "" {
-		return JobSpec{}, fmt.Errorf("command spec sets host working directory %q, but a Kubernetes Job cannot reach the host filesystem and this renderer has no workspace transport yet; deliver the workspace into the pod (baked into the image, or fetched by the agent) and leave CommandSpec.WorkingDir empty", cs.WorkingDir)
+	env, err := mapEnv(out, rs, cs, hostWorkspace)
+	if err != nil {
+		return JobSpec{}, err
 	}
-
-	// The environment carried by a RuntimeSpec/CommandSpec is RESOLVED HOST
-	// ENVIRONMENT: Andbo populates it by reading every name in
-	// policy.secrets.allow out of the host, and feeds those same values to the
-	// log redactor — the codebase classifies them as secrets. A rendered
-	// manifest is plain text stored in etcd and readable by anyone who can get
-	// the Job, and envVar here has no valueFrom, so there is no safe way to
-	// carry them. Fail closed rather than inline a live credential. The error
-	// deliberately names no value.
-	if len(rs.Env) > 0 || len(cs.Env) > 0 {
-		return JobSpec{}, fmt.Errorf("runtime/command environment (%d variable(s)) cannot be bridged: Andbo resolves host secrets into it, and this renderer would inline them as plain text in the manifest; deliver them through a Kubernetes Secret (not supported in this slice), or set JobSpec.Env yourself with non-secret literals only", len(rs.Env)+len(cs.Env))
-	}
+	out.Env = env
 
 	switch rs.NetworkMode {
 	case "none", "deny":
@@ -107,6 +88,117 @@ func FromRuntimeSpec(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpe
 	}
 
 	return out, nil
+}
+
+// mapWorkspace validates the host-side workspace inputs and returns the host
+// workspace path, or "" when the run has none. The path is used ONLY to
+// recognise which inputs refer to the workspace so they can be remapped to the
+// pod path; it never reaches a manifest, where it would leak the host's
+// username and directory layout into an object applied to a shared cluster.
+func mapWorkspace(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpec) (string, error) {
+	// Read-only host mounts have no equivalent and, unlike the workspace, there
+	// is nothing to remap them to: a hostPath volume would expose the node
+	// filesystem, which is the whole reason it is absent from the volume type.
+	if len(rs.ReadOnlyPaths) > 0 {
+		return "", fmt.Errorf("runtime spec mounts %d read-only host path(s), which have no safe Kubernetes equivalent (a hostPath volume would expose the node filesystem); bake what the agent needs into the image, or run this workload on the container runtime", len(rs.ReadOnlyPaths))
+	}
+
+	// RuntimeSpec.Workdir is a HOST path: the container runtime bind-mounts the
+	// sanitized workspace copy at that same path, which is the only reason it
+	// means anything there. Andbo builds exactly this shape — Workdir is the
+	// workspace copy and WritePaths holds that one directory (buildRuntimeSpec
+	// in internal/cli).
+	host := rs.Workdir
+	if host != "" {
+		// Every comparison below is literal, so a second spelling of the same
+		// directory would be classified as an unrelated host mount and rejected
+		// — or worse, a HOME that is really the workspace would look foreign.
+		// Reject rather than canonicalise: the caller's own strings must agree.
+		if !strings.HasPrefix(host, "/") {
+			return "", fmt.Errorf("runtime workdir %q is not an absolute path; the Kubernetes renderer matches the workspace path literally against the mount list, HOME, and the command working directory, and will not guess what a relative path resolves to on the host", host)
+		}
+		if host != path.Clean(host) {
+			return "", fmt.Errorf("runtime workdir %q is not a clean absolute path (it resolves to %q); the Kubernetes renderer matches the workspace path literally, so a second spelling of the same directory would be treated as an unrelated host mount", host, path.Clean(host))
+		}
+	}
+
+	switch {
+	case len(rs.WritePaths) == 0:
+	case host != "" && len(rs.WritePaths) == 1 && rs.WritePaths[0] == host:
+		// The sanitized workspace copy, delivered by the transport checked below.
+	default:
+		return "", fmt.Errorf("runtime spec mounts %d host path(s) beyond the workspace copy; a hostPath volume would expose the node filesystem, so the only directory that can cross into a Job is the one named by RuntimeSpec.Workdir (currently %q). Drop the extra mounts, or run this workload on the container runtime", len(rs.WritePaths), host)
+	}
+
+	// CommandSpec.WorkingDir is likewise a host directory (the local runner
+	// chdirs into it, and every adapter sets it to the workspace path). It is
+	// accepted only when it IS the workspace, and the pod path replaces it.
+	if cs.WorkingDir != "" && cs.WorkingDir != host {
+		return "", fmt.Errorf("command spec sets host working directory %q, which is not the workspace this run declares (%q); a Kubernetes Job cannot reach the host filesystem, so the agent can only start inside the workspace, which the renderer maps to the pod path %q", cs.WorkingDir, host, base.WorkingDir)
+	}
+
+	if host == "" {
+		return "", nil
+	}
+
+	// This is the check that prevents the silent failure. A Job has no path to
+	// the host, so the workspace can only arrive by a declared transport; with
+	// WorkspaceEmpty the manifest renders perfectly well and the agent starts on
+	// an empty directory while the caller believes the repository is there.
+	if base.WorkspaceTransport != WorkspaceFromImage {
+		return "", fmt.Errorf("runtime spec carries a host workspace at %q, but the JobSpec declares workspaceTransport %q, so the agent would run against an empty volume; a Kubernetes Job cannot reach the host filesystem, so set WorkspaceTransport to %q and ImageWorkspacePath to the directory inside the image that holds the workspace", host, base.WorkspaceTransport, WorkspaceFromImage)
+	}
+
+	return host, nil
+}
+
+// mapEnv merges the runtime and command environments (command wins, matching
+// the container runtime) and refuses everything except HOME.
+//
+// The environment carried by a RuntimeSpec/CommandSpec is RESOLVED HOST
+// ENVIRONMENT: Andbo populates it by reading every name in policy.secrets.allow
+// out of the host, and feeds those same values to the log redactor — the
+// codebase classifies them as secrets. A rendered manifest is plain text stored
+// in etcd and readable by anyone who can get the Job, and envVar has no
+// valueFrom, so there is no safe way to carry them. Errors name no value.
+//
+// HOME is the one exception, and it belongs to the workspace rather than to the
+// secret set: internal/cli points it at the workspace copy so git and package
+// managers work under a non-root UID. It is REWRITTEN to the pod working
+// directory — keeping the host value would leak the host layout, and dropping
+// it would leave HOME on the read-only root filesystem, where those same tools
+// fail. It is bridged ONLY when it is exactly the workspace path; a HOME
+// pointing anywhere else is an arbitrary host directory and is refused.
+func mapEnv(base JobSpec, rs runtime.RuntimeSpec, cs runtime.CommandSpec, hostWorkspace string) (map[string]string, error) {
+	merged := make(map[string]string, len(rs.Env)+len(cs.Env))
+	for k, v := range rs.Env {
+		merged[k] = v
+	}
+	for k, v := range cs.Env {
+		merged[k] = v
+	}
+
+	home, hasHome := merged["HOME"]
+	bridgeHome := hasHome && hostWorkspace != "" && home == hostWorkspace
+	unbridgeable := len(merged)
+	if bridgeHome {
+		unbridgeable--
+	}
+	if unbridgeable > 0 {
+		return nil, fmt.Errorf("runtime/command environment carries %d variable(s) that cannot be bridged: Andbo resolves host secrets into it, and this renderer would inline them as plain text in the manifest; deliver them through a Kubernetes Secret (not supported in this slice), or set JobSpec.Env yourself with non-secret literals only. HOME is the only bridged name, and only when it points at the workspace", unbridgeable)
+	}
+	if !bridgeHome {
+		return base.Env, nil
+	}
+
+	// JobSpec is copied by value but its Env map is not, so writing HOME in
+	// place would edit the caller's map behind its back.
+	env := make(map[string]string, len(base.Env)+1)
+	for k, v := range base.Env {
+		env[k] = v
+	}
+	env["HOME"] = base.WorkingDir
+	return env, nil
 }
 
 // parseRunAsUser converts a docker-style "uid" or "uid:gid" string to a UID.

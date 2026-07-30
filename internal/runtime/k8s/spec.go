@@ -19,6 +19,9 @@
 //   - Everything unbounded is rejected at the boundary: resources, deadline,
 //     TTL, and scratch space must all be set and within caps.
 //   - Unsupported network modes fail closed (see NetworkMode).
+//   - How the workspace reaches the pod is declared, not assumed (see
+//     WorkspaceTransport): the writable volume is an emptyDir, so an undeclared
+//     transport is indistinguishable from a workspace that was silently lost.
 package k8s
 
 // NetworkMode selects the egress posture of the rendered Job.
@@ -38,6 +41,35 @@ const (
 	// NetworkOpen is NOT implemented here: unrestricted egress from a cluster
 	// workload is an unsafe mode that this renderer does not offer.
 	NetworkOpen NetworkMode = "open"
+)
+
+// WorkspaceTransport declares how the agent's workspace reaches the pod.
+//
+// A Job has no access to the host, so the bind mount the container runtime
+// relies on has no equivalent here, and the writable workspace volume is an
+// emptyDir that starts out empty. The transport is therefore an explicit part
+// of the contract rather than an assumption: an undeclared transport is
+// indistinguishable from a workspace that was silently lost, and an agent that
+// runs against an empty directory while the caller believes the repository is
+// there is a correctness AND a security problem (it can commit or push an
+// emptied tree).
+type WorkspaceTransport string
+
+const (
+	// WorkspaceEmpty starts the agent on an empty workspace volume. It is a
+	// deliberate choice, not a fallback.
+	WorkspaceEmpty WorkspaceTransport = "empty"
+
+	// WorkspaceFromImage carries the workspace inside the agent image at
+	// ImageWorkspacePath, and copies it into the writable workspace volume with
+	// an init container before the agent starts.
+	//
+	// This is the only transport a render-only package can offer: fetching over
+	// the network is impossible under the default-deny NetworkPolicy, hostPath
+	// would expose the node filesystem, and anything that pushes bytes into a
+	// running pod requires cluster contact. It costs an image build per run,
+	// and its limits are stated in EnforcementNotes.
+	WorkspaceFromImage WorkspaceTransport = "image"
 )
 
 // Bounds and secure defaults. Every cap exists so a rendered Job cannot occupy
@@ -64,9 +96,10 @@ const (
 	DefaultWorkingDir = "/work"
 	tmpDir            = "/tmp"
 
-	workspaceVolume = "workspace"
-	tmpVolume       = "tmp"
-	containerName   = "agent"
+	workspaceVolume   = "workspace"
+	tmpVolume         = "tmp"
+	containerName     = "agent"
+	initContainerName = "workspace-init"
 
 	labelName      = "app.kubernetes.io/name"
 	labelInstance  = "app.kubernetes.io/instance"
@@ -108,6 +141,15 @@ type JobSpec struct {
 	WorkspaceSizeLimit string
 	TmpSizeLimit       string
 
+	// WorkspaceTransport declares how the workspace bytes reach the pod. It has
+	// no default and must be set explicitly; see WorkspaceTransport.
+	WorkspaceTransport WorkspaceTransport
+	// ImageWorkspacePath is the directory INSIDE the image that holds the
+	// workspace. Required for WorkspaceFromImage and rejected otherwise. It must
+	// not overlap WorkingDir or the scratch mount, which would hide it behind an
+	// empty volume and deliver nothing.
+	ImageWorkspacePath string
+
 	// ActiveDeadlineSeconds is the wall-clock budget; Kubernetes terminates the
 	// Job when it elapses.
 	ActiveDeadlineSeconds int64
@@ -141,6 +183,7 @@ func DefaultJobSpec() JobSpec {
 		MemoryLimit:             "1Gi",
 		WorkspaceSizeLimit:      "1Gi",
 		TmpSizeLimit:            "64Mi",
+		WorkspaceTransport:      WorkspaceEmpty,
 		ActiveDeadlineSeconds:   DefaultActiveDeadlineSeconds,
 		TTLSecondsAfterFinished: DefaultTTLSecondsAfterFinished,
 		RunAsUser:               DefaultRunAsUser,
@@ -166,6 +209,9 @@ func (s JobSpec) EnforcementNotes() []string {
 		"CPU and memory limits are required and checked for form and ordering, but this renderer sets no ceiling on how large they may be — use a namespace ResourceQuota or LimitRange for that",
 		"only the working directory and " + tmpDir + " are writable. In particular $HOME is NOT: most images point it at the read-only root filesystem, so git, npm, and pip will fail until you redirect HOME (and any XDG cache/config paths) into the working directory via JobSpec.Env",
 		"env values are rendered literally into plain-text manifests that live in etcd and are readable by anyone who can get the Job: never place secrets in JobSpec.Env",
+		"the workspace is delivered INTO the pod only; nothing is copied back OUT. This package never contacts a cluster, so the results of a run (diff, commits, logs) have to be retrieved by whoever applies the manifest — under the default-deny NetworkPolicy the agent itself has no outbound path to push them",
+		"with workspaceTransport=image the workspace is a layer of the agent image: anyone who can pull that image can read it, and it persists in the registry and in every node's image cache. Build a per-run image, keep it private, and never bake a workspace holding credentials",
+		"the image transport needs a `cp` on the image PATH and a workspace readable by runAsUser. File ownership is NOT preserved — the init container is non-root, so everything lands owned by runAsUser (GNU cp skips ownership silently; busybox cp warns on stderr but still succeeds). The copy also has to fit inside workspaceSizeLimit: a workspace larger than that limit fills the emptyDir and the node evicts the pod part-way through",
 	}
 }
 

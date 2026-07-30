@@ -127,6 +127,13 @@ func TestAdversarial_HostilePayloadsCannotWeakenTheManifest(t *testing.T) {
 		"MemoryLimit":        func(s *JobSpec, v string) { s.MemoryLimit = v },
 		"WorkspaceSizeLimit": func(s *JobSpec, v string) { s.WorkspaceSizeLimit = v },
 		"TmpSizeLimit":       func(s *JobSpec, v string) { s.TmpSizeLimit = v },
+		"WorkspaceTransport": func(s *JobSpec, v string) { s.WorkspaceTransport = WorkspaceTransport(v) },
+		// The workspace source becomes an argument of the init container, so a
+		// payload here must either be rejected or stay an inert scalar.
+		"ImageWorkspacePath": func(s *JobSpec, v string) {
+			s.WorkspaceTransport = WorkspaceFromImage
+			s.ImageWorkspacePath = v
+		},
 	}
 
 	for field, set := range fields {

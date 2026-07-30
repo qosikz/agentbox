@@ -47,6 +47,13 @@ func reservedMountPath(dir string) (string, bool) {
 	return "", false
 }
 
+// pathsOverlap reports whether a and b name the same directory or one contains
+// the other. Both must already be clean absolute paths for the prefix test to
+// be meaningful, which Validate checks before calling this.
+func pathsOverlap(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
 // unsafeRune reports whether r must never reach a rendered manifest.
 //
 // Beyond the obvious control characters, two classes matter specifically here:
@@ -188,6 +195,8 @@ func (s JobSpec) Validate() error {
 		}
 	}
 
+	problems = append(problems, s.checkWorkspaceTransport()...)
+
 	// Identity of the process. This is the one numeric field that can undo the
 	// non-root guarantee, so it is checked explicitly rather than defaulted.
 	if err := checkUID(s.RunAsUser); err != nil {
@@ -240,6 +249,61 @@ func (s JobSpec) Validate() error {
 	}
 	return fmt.Errorf("kubernetes job spec is invalid:\n  - %s\n\nFix the fields above, then render again. Start from DefaultJobSpec() for secure defaults.",
 		strings.Join(problems, "\n  - "))
+}
+
+// checkWorkspaceTransport validates the declared workspace transport.
+//
+// The transport is required because the workspace volume is an emptyDir: with
+// nothing declared, a spec that lost its workspace and a spec that never had
+// one render identically. For the image transport the real hazard is masking —
+// the writable emptyDirs are mounted over WorkingDir and tmpDir, so a source
+// path that overlaps either is invisible to the init container. The copy then
+// succeeds, delivers nothing, and the agent works on an empty tree.
+func (s JobSpec) checkWorkspaceTransport() []string {
+	var problems []string
+	add := func(format string, args ...any) {
+		problems = append(problems, fmt.Sprintf(format, args...))
+	}
+
+	switch s.WorkspaceTransport {
+	case WorkspaceEmpty:
+		if s.ImageWorkspacePath != "" {
+			add("imageWorkspacePath %q is set but workspaceTransport is %q, so nothing would copy it; set workspaceTransport to %q or clear the path", s.ImageWorkspacePath, WorkspaceEmpty, WorkspaceFromImage)
+		}
+		return problems
+	case WorkspaceFromImage:
+	case "":
+		add("workspaceTransport is not set; declare it explicitly as %q (the agent starts on an empty volume) or %q (the workspace is baked into the image and copied in) — a Job cannot reach the host, so there is no safe default", WorkspaceEmpty, WorkspaceFromImage)
+		return problems
+	default:
+		add("workspaceTransport %q is invalid (expected %q or %q)", s.WorkspaceTransport, WorkspaceEmpty, WorkspaceFromImage)
+		return problems
+	}
+
+	switch {
+	case s.ImageWorkspacePath == "":
+		add("imageWorkspacePath must be set for workspaceTransport %q; name the directory inside the image that holds the workspace (e.g. \"/andbo/workspace\")", WorkspaceFromImage)
+	case !strings.HasPrefix(s.ImageWorkspacePath, "/"):
+		add("imageWorkspacePath %q must be an absolute path inside the image", s.ImageWorkspacePath)
+	case s.ImageWorkspacePath == "/":
+		add("imageWorkspacePath must not be \"/\"; copying the whole image root into the workspace volume is never what is meant")
+	case hasUnsafeRunes(s.ImageWorkspacePath, false):
+		add("imageWorkspacePath contains control, bidirectional, or zero-width characters")
+	case s.ImageWorkspacePath != path.Clean(s.ImageWorkspacePath):
+		// Same reason WorkingDir must be canonical: the overlap checks below
+		// compare strings while the kernel resolves them.
+		add("imageWorkspacePath %q is not a clean absolute path; remove any \"..\", \".\", repeated \"/\", or trailing \"/\" segments (it resolves to %q, and the mount overlap checks compare paths literally)", s.ImageWorkspacePath, path.Clean(s.ImageWorkspacePath))
+	default:
+		// tmpDir is part of reservedMountPaths, so this also catches a source
+		// hidden behind the scratch volume.
+		if dir, reserved := reservedMountPath(s.ImageWorkspacePath); reserved {
+			add("imageWorkspacePath %q is inside %q, which the image or the kernel owns; a workspace source must be a dedicated directory (e.g. \"/andbo/workspace\"), not a system path", s.ImageWorkspacePath, dir)
+		} else if s.WorkingDir != "" && pathsOverlap(s.ImageWorkspacePath, s.WorkingDir) {
+			add("imageWorkspacePath %q overlaps workingDir %q, which is mounted as an EMPTY volume: the source would be hidden and the copy would deliver nothing. Keep the workspace source outside the working directory", s.ImageWorkspacePath, s.WorkingDir)
+		}
+	}
+
+	return problems
 }
 
 // checkResourcePair validates that a request/limit pair is present, parseable,
