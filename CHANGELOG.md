@@ -74,6 +74,29 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **A negative `budget.max_runtime_minutes` meant something different on every
+  surface, and none of them was the bound it asked for.** A sign typo on the
+  default budget — `-30` where `30` was meant — validated clean and then took
+  three separate paths. `andbo run` and `andbo exec` gate the deadline on
+  `> 0`, so the run executed with **no deadline at all**: not the 30 minutes
+  written, and not an error either. `andbo k8s render` gates the same way, left
+  `activeDeadlineSeconds` at the renderer's own `1800`, and emitted a clean
+  manifest carrying a 30-minute bound the policy never expressed. `andbo policy
+  check` — the gate a pipeline runs *before* any of that — printed
+  `minutes=-30` and `✓ Policy valid`, exit `0`.
+
+  A negative wall-clock budget is not a duration, so it is now an invalid policy
+  and is refused by `policy check`, `run`, `exec`, and `k8s render` alike, with
+  exit `7` and an error naming the field, the value written, and both ways out
+  (a positive number of minutes, or `0` for no deadline). `0` is unchanged and
+  still means "no deadline" for `run`/`exec` and the renderer's bounded default
+  for `k8s render`.
+
+  The check lives in `config.Check` rather than in each command, because that is
+  the one validation all four surfaces already funnel through: the same four
+  cannot drift apart again, which is how they came to disagree here in the first
+  place. It bounds only the bottom of the range — the top stays with
+  `checkBudgetMinutes`, where the refusal has to name the representable maximum.
 - **`andbo run` / `andbo exec`: `budget.max_runtime_minutes` overflowed into a
   window the policy never asked for.** The conversion to a deadline multiplied
   minutes by `time.Minute` unguarded. A `time.Duration` counts nanoseconds in an
@@ -103,11 +126,12 @@ All notable changes to Andbo are documented here.
   The conversion itself was made total in both directions. The negative half
   wrapped too, and wrapped the wrong way: `-9007199254740991` minutes multiplied
   out to a plausible **one-minute** window, which passes the runners' `Timeout > 0`
-  gate and so reads as enforced. `0` — or any value below it — is how the policy
-  spells "no deadline", so that is now exactly what the conversion returns.
-  Unreachable through the commands, which gate on `> 0`; it is there so a call
-  site added later cannot resurrect the defect, which is how `run` and `exec` came
-  to differ from `k8s render` in the first place.
+  gate and so reads as enforced. `0` is how the policy spells "no deadline", so
+  that is now exactly what the conversion returns for anything at or below it.
+  Unreachable through the commands, which gate on `> 0` — and a negative no
+  longer reaches it at all (see below) — but it is there so a call site added
+  later cannot resurrect the defect, which is how `run` and `exec` came to differ
+  from `k8s render` in the first place.
 - **Kubernetes renderer: host-workspace leak check matched substrings, not
   paths.** `FromRuntimeSpec` refused any argv containing the workspace path, via
   `strings.Contains`. That was harmless while the only caller passed a long,

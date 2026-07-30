@@ -102,9 +102,11 @@ func TestBudgetWindowIsTotal(t *testing.T) {
 			}
 			got := budgetWindow(int(tc.minutes))
 			if tc.minutes <= 0 {
-				// At or below zero is how the policy spells "no deadline", and
-				// every caller gates on `> 0`. The conversion must say exactly
-				// that, not a window arithmetic invented out of a sign flip.
+				// Zero is how the policy spells "no deadline", and every caller
+				// gates on `> 0`. A negative is refused by config.Check before
+				// it can reach a command, but the conversion still has to answer
+				// with that same 0 — not a window invented out of a sign flip —
+				// for any caller added later.
 				if got != 0 {
 					t.Fatalf("budgetWindow(%d) = %v, want 0; a non-positive budget means no deadline", tc.minutes, got)
 				}
@@ -208,19 +210,134 @@ func TestRunAcceptsTheLargestRepresentableBudget(t *testing.T) {
 	}
 }
 
-// A budget of zero or below is the documented way to say "no deadline", and
-// this guard must not quietly change that. Pinned so the meaning of the values
-// on the other boundary is a decision, not an accident.
-func TestNonPositiveBudgetStillMeansNoDeadline(t *testing.T) {
-	for _, minutes := range []string{"0", "-5"} {
-		t.Run("minutes="+minutes, func(t *testing.T) {
-			budgetProject(t, minutes)
-			r := NewRoot("test", "none", "now")
-			if err := r.cmdRun(context.Background(), []string{"fix failing tests", "--dry-run"}); err != nil {
-				t.Fatalf("max_runtime_minutes=%s means no deadline and must be accepted: %v", minutes, err)
-			}
-		})
+// A budget of exactly zero is the documented way to say "no deadline", and the
+// negative refusal must not quietly swallow it. Pinned so the boundary between
+// "no deadline" and "not a duration" is a decision, not an accident.
+func TestZeroBudgetStillMeansNoDeadline(t *testing.T) {
+	budgetProject(t, "0")
+	r := NewRoot("test", "none", "now")
+	if err := r.cmdRun(context.Background(), []string{"fix failing tests", "--dry-run"}); err != nil {
+		t.Fatalf("max_runtime_minutes=0 means no deadline and must be accepted: %v", err)
 	}
+}
+
+// negativeBudgetCases name a wall-clock bound no clock can reach. -30 is the
+// shape that matters most — a sign typo on the default budget, which reads as
+// "30 minutes" to everyone but the code. -9007199254740991 is the sharpest:
+// naively converted it wraps POSITIVE into a plausible one-minute window, the
+// direction that passes the runners' `Timeout > 0` gate and so reads as
+// enforced.
+var negativeBudgetCases = []string{"-1", "-30", "-9007199254740991"}
+
+// budgetSurfaces are the commands that read budget.max_runtime_minutes. Each
+// returns what the USER can see alongside the error, because the surfaces put
+// it in different places: policy check reports on stdout, run and exec warn on
+// stderr and return only a pointer to 'andbo policy check', and k8s render
+// writes diagnostics to its own stderr stream.
+func budgetSurfaces() map[string]func(*testing.T) (string, error) {
+	return map[string]func(*testing.T) (string, error){
+		"run": func(t *testing.T) (string, error) {
+			return captureStderr(t, func() error {
+				return NewRoot("test", "none", "now").cmdRun(context.Background(), []string{"fix failing tests", "--dry-run"})
+			})
+		},
+		"exec": func(t *testing.T) (string, error) {
+			return captureStderr(t, func() error {
+				return NewRoot("test", "none", "now").cmdExec(context.Background(), []string{"echo hi", "--dry-run"})
+			})
+		},
+		"policy check": func(t *testing.T) (string, error) {
+			return captureStdout(t, func() error {
+				return NewRoot("test", "none", "now").cmdPolicy([]string{"check"})
+			})
+		},
+		"k8s render": func(t *testing.T) (string, error) {
+			out, errOut, err := runK8s(t, okArgs()...)
+			// A refused render must write no manifest. This is the concrete bug:
+			// a negative left cs.Timeout at zero, the bridge kept its own 1800s
+			// default, and the Job carried an activeDeadlineSeconds the policy
+			// never asked for.
+			if out != "" {
+				t.Errorf("a refused render must write nothing to stdout, got:\n%s", out)
+			}
+			return errOut, err
+		},
+	}
+}
+
+// A negative budget is not a duration, and every surface used to read it
+// differently: run and exec gate the deadline on `> 0` and so ran with NO
+// deadline at all, k8s render gated the same way and fell through to the
+// renderer's 1800s activeDeadlineSeconds default, and policy check called both
+// of those policies valid. One value, three meanings, no error anywhere.
+func TestEverySurfaceRefusesANegativeBudget(t *testing.T) {
+	for _, minutes := range negativeBudgetCases {
+		for name, invoke := range budgetSurfaces() {
+			t.Run(minutes+"/"+name, func(t *testing.T) {
+				budgetProject(t, minutes)
+				shown, err := invoke(t)
+				// A malformed value is an invalid policy, which is the exit code
+				// every surface already returns for one — so a CI gate that
+				// watches for it catches this without learning a new code.
+				if CodeFor(err) != ExitInvalidConfig {
+					t.Fatalf("exit code = %d, want %d (err=%v)\n%s", CodeFor(err), ExitInvalidConfig, err, shown)
+				}
+				// The exit code alone would be satisfied by any unrelated
+				// validation failure, so what the user reads has to name this one.
+				for _, needle := range []string{"budget.max_runtime_minutes", minutes} {
+					if !strings.Contains(shown, needle) {
+						t.Errorf("what the user is shown does not name %q:\n%s", needle, shown)
+					}
+				}
+			})
+		}
+	}
+}
+
+// policy check is the gate a pipeline runs before anything executes, so its
+// verdict has to be the refusal and not a clean bill of health — on both output
+// paths, which are separate returns that could disagree.
+func TestPolicyCheckReportsTheNegativeBudgetRefusal(t *testing.T) {
+	const minutes = "-30"
+
+	t.Run("human", func(t *testing.T) {
+		budgetProject(t, minutes)
+		r := NewRoot("test", "none", "now")
+		out, err := captureStdout(t, func() error { return r.cmdPolicy([]string{"check"}) })
+		if CodeFor(err) != ExitInvalidConfig {
+			t.Fatalf("exit code = %d, want %d (err=%v)\n%s", CodeFor(err), ExitInvalidConfig, err, out)
+		}
+		if strings.Contains(out, "✓ Policy valid") {
+			t.Errorf("report calls the policy valid:\n%s", out)
+		}
+		// The fix line is a continuation of its bullet, not a stray unindented
+		// line in the middle of the error list.
+		if !strings.Contains(out, "\n    Set it to") {
+			t.Errorf("multi-line error lost its continuation indent:\n%s", out)
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		budgetProject(t, minutes)
+		r := NewRoot("test", "none", "now")
+		out, err := captureStdout(t, func() error { return r.cmdPolicy([]string{"check", "--json"}) })
+		if CodeFor(err) != ExitInvalidConfig {
+			t.Fatalf("exit code = %d, want %d (err=%v)\n%s", CodeFor(err), ExitInvalidConfig, err, out)
+		}
+		var got struct {
+			Valid  bool     `json:"valid"`
+			Errors []string `json:"errors"`
+		}
+		if jerr := json.Unmarshal([]byte(out), &got); jerr != nil {
+			t.Fatalf("stdout is not valid JSON (%v):\n%s", jerr, out)
+		}
+		if got.Valid {
+			t.Errorf("valid = true for a budget every surface refuses:\n%s", out)
+		}
+		if !slicesContainsSubstring(got.Errors, "budget.max_runtime_minutes") {
+			t.Errorf("errors do not name the budget field: %q", got.Errors)
+		}
+	})
 }
 
 // `andbo policy check` is the gate a pipeline runs BEFORE anything executes, so
@@ -296,15 +413,29 @@ func slicesContainsSubstring(items []string, needle string) bool {
 // injectable writer, so this is the only way to assert its report.
 func captureStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
-	f, ferr := os.CreateTemp(t.TempDir(), "stdout")
+	return captureStream(t, &os.Stdout, fn)
+}
+
+// captureStderr is the same for stderr. run and exec print each policy error
+// with warn(), straight to os.Stderr — the error they RETURN only names the
+// file and points at 'andbo policy check' — so this is the only way to assert
+// the user is told WHICH field is wrong.
+func captureStderr(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	return captureStream(t, &os.Stderr, fn)
+}
+
+func captureStream(t *testing.T, stream **os.File, fn func() error) (string, error) {
+	t.Helper()
+	f, ferr := os.CreateTemp(t.TempDir(), "stream")
 	if ferr != nil {
 		t.Fatal(ferr)
 	}
 	defer f.Close()
-	prev := os.Stdout
-	os.Stdout = f
+	prev := *stream
+	*stream = f
 	err := fn()
-	os.Stdout = prev
+	*stream = prev
 	data, rerr := os.ReadFile(f.Name())
 	if rerr != nil {
 		t.Fatal(rerr)

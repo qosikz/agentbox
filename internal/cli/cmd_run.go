@@ -65,8 +65,9 @@ const maxBudgetMinutes = int(math.MaxInt64 / int64(time.Minute))
 // The negative half matters as much as the positive one, and wraps the wrong
 // way: -9007199254740991 minutes multiplies out to a plausible ONE-MINUTE
 // window, which passes the runners' `Timeout > 0` gate and so reads as
-// enforced. At or below zero is how the policy spells "no deadline", so that is
-// what the conversion returns.
+// enforced. A negative budget no longer reaches here — config.Check refuses it
+// for every surface at once — but the conversion stays total, and answers with
+// the 0 that every caller reads as "no deadline".
 var budgetWindow = func(minutes int) time.Duration {
 	if minutes <= 0 {
 		return 0
@@ -78,7 +79,9 @@ var budgetWindow = func(minutes int) time.Duration {
 }
 
 // checkBudgetMinutes refuses a budget that cannot be turned into the deadline
-// the policy asks for.
+// the policy asks for. It bounds the TOP of the range only; the bottom — a
+// negative, which is not a duration at all — is a malformed value and is
+// refused by config.Check, on every surface at once.
 //
 // This is a policy violation and not a configuration typo: the value parses,
 // and what cannot be delivered is the enforcement. It therefore carries the
