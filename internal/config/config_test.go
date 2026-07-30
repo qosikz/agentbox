@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -122,6 +123,82 @@ func TestCheckDetectsErrorsAndUnsafe(t *testing.T) {
 func TestCheckValidDefaultPolicyOK(t *testing.T) {
 	if r := DefaultPolicy().Check(); !r.OK() {
 		t.Errorf("default policy should be valid, errors: %v", r.Errors)
+	}
+}
+
+// A negative wall-clock budget is not a duration, and no surface agreed on what
+// it meant: run and exec gate the deadline on `> 0` and so ran with NO deadline,
+// while `k8s render` gated the same way and fell through to the renderer's own
+// 1800s activeDeadlineSeconds — a bound the policy never asked for. Refusing it
+// in Check is what makes the answer the same everywhere, because Check is the
+// one validation every surface funnels through.
+func TestCheckRejectsANegativeRuntimeBudget(t *testing.T) {
+	// -30 is the shape that matters most: a sign typo on the default budget,
+	// which reads as "30 minutes" to everyone but the code.
+	for _, minutes := range []int{-1, -30, -1800} {
+		p := DefaultPolicy()
+		p.Budget.MaxRuntimeMinutes = minutes
+		r := p.Check()
+		if r.OK() {
+			t.Errorf("budget.max_runtime_minutes = %d must be an error, got none", minutes)
+			continue
+		}
+		// The exit code alone would be satisfied by any unrelated validation
+		// failure, so the message has to name the field and the value written.
+		var found string
+		for _, e := range r.Errors {
+			if strings.Contains(e, "budget.max_runtime_minutes") {
+				found = e
+			}
+		}
+		if found == "" {
+			t.Errorf("errors for %d do not name the field: %v", minutes, r.Errors)
+			continue
+		}
+		if !strings.Contains(found, strconv.Itoa(minutes)) {
+			t.Errorf("error does not quote the value %d back: %q", minutes, found)
+		}
+	}
+}
+
+// Check errors have to be single-line. The CLI surfaces that act on a policy —
+// run, exec, k8s render — print each one with warn(), which prefixes "! " and
+// renders the string flat: a newline inside the message becomes a line with no
+// prefix and no indent, reading as an unattributed stray line rather than part
+// of its own error. (`andbo policy check` indents continuations; the other
+// three do not, so the message cannot rely on that.)
+func TestCheckErrorsAreSingleLine(t *testing.T) {
+	p := DefaultPolicy()
+	// Provoke as many errors at once as the checker can produce, so this covers
+	// every message rather than whichever one a future edit happens to add.
+	p.Runtime.Isolation = "bogus"
+	p.Runtime.Engine = "bogus"
+	p.Runtime.Image = ""
+	p.Network.Mode = "bogus"
+	p.Network.Ports = []int{0, 70000}
+	p.Secrets.Mode = "bogus"
+	p.MCP.Mode = "bogus"
+	p.Budget.MaxRuntimeMinutes = -30
+	r := p.Check()
+	if len(r.Errors) < 8 {
+		t.Fatalf("expected every checked field to error, got %d: %v", len(r.Errors), r.Errors)
+	}
+	for _, e := range r.Errors {
+		if strings.Contains(e, "\n") {
+			t.Errorf("error contains a newline, which warn() renders as an orphan line:\n%q", e)
+		}
+	}
+}
+
+// Zero is the documented way to say "no deadline" and stays valid. Pinned next
+// to the refusal so the boundary between them is a decision, not an accident.
+func TestCheckAcceptsZeroAndPositiveRuntimeBudgets(t *testing.T) {
+	for _, minutes := range []int{0, 1, 30, 1440} {
+		p := DefaultPolicy()
+		p.Budget.MaxRuntimeMinutes = minutes
+		if r := p.Check(); !r.OK() {
+			t.Errorf("budget.max_runtime_minutes = %d must be valid, errors: %v", minutes, r.Errors)
+		}
 	}
 }
 

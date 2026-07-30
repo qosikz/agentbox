@@ -440,8 +440,10 @@ required CPU/memory requests and limits, `HOME` pointed at the writable volume
 (the root filesystem is read-only), and a bounded `ttlSecondsAfterFinished` and
 `activeDeadlineSeconds` — the latter from `budget.max_runtime_minutes`, or 1800s
 when that is `0`. (`andbo run` reads `0` as "no deadline"; a pod nobody is
-supervising always gets one.) Rendering is deterministic, so the same inputs
-produce a byte-identical manifest you can diff and pin.
+supervising always gets one. A negative is not a duration and stops the render
+as an invalid policy, rather than falling through to that same default.)
+Rendering is deterministic, so the same inputs produce a byte-identical manifest
+you can diff and pin.
 
 Where it fails closed instead of downgrading — all of these exit **2**:
 `network.mode` `allowlist` and `open` are **rejected** (NetworkPolicy selects by
@@ -493,11 +495,15 @@ A few runtime knobs worth knowing:
 - `runtime.engine: docker | podman` selects the container engine (or use
   `--engine` per run).
 - `budget.max_runtime_minutes` is enforced as a hard deadline on real runs —
-  the agent is stopped when it expires (dry-run is unaffected). `0` — or any
-  value below it — means no deadline at all for `run` and `exec` (`k8s render`
-  substitutes its own bounded default instead). Values above 153722867 (the
-  largest a nanosecond deadline can hold) are refused by `run`, `exec`, and
-  `policy check` rather than converted into some other window.
+  the agent is stopped when it expires (dry-run is unaffected). `0` means no
+  deadline at all for `run` and `exec` (`k8s render` substitutes its own bounded
+  default instead). A **negative** value is not a duration and is refused as an
+  invalid policy (exit **7**) by `policy check`, `run`, `exec`, and `k8s render`
+  alike — it used to mean three different things: no deadline for `run` and
+  `exec`, the renderer's 1800s default for `k8s render`, and a valid policy to
+  `policy check`. Values above 153722867 (the largest a nanosecond deadline can
+  hold) are refused by `run`, `exec`, and `policy check` rather than converted
+  into some other window.
 - `runtime.cleanup` is honored: the disposable workspace copy is removed after
   the run; set `cleanup: false` to keep it for debugging. Session artifacts
   under `.andbo/sessions/` are always kept.

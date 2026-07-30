@@ -89,7 +89,29 @@ func (p Policy) Check() CheckResult {
 		r.UnsupportedModes = append(r.UnsupportedModes, "commands.deny is best-effort; an agent that spawns shells indirectly may bypass it")
 	}
 
-	// Budget: token/usd caps depend on adapter support.
+	// Budget: a negative wall-clock budget is not a duration, and every surface
+	// read it as something different. run and exec gate the deadline on `> 0`,
+	// so a negative ran with NO deadline at all; `k8s render` gates the same way
+	// and fell through to the renderer's own 1800s activeDeadlineSeconds, a bound
+	// the policy never asked for. `andbo policy check` called both valid.
+	//
+	// Security: it is refused HERE, and not at each command, because Check is the
+	// one validation every surface that READS the budget funnels through — those
+	// four cannot drift apart again, which is exactly how they came to disagree
+	// in the first place. (`andbo doctor` reads a policy without calling Check,
+	// but never reads the budget; it reports parseability only.) Zero keeps its
+	// documented meaning of "no deadline"; only below zero is refused, because
+	// that is the value no reading of the policy can honour.
+	//
+	// Single-line, like every error here: run, exec, and k8s render print these
+	// with warn(), which renders the string flat, so a newline would land as an
+	// unprefixed line that reads as stray prose rather than as this error's fix.
+	if p.Budget.MaxRuntimeMinutes < 0 {
+		r.Errors = append(r.Errors, fmt.Sprintf(
+			"budget.max_runtime_minutes %d is invalid (expected: 0 or more, where 0 means no deadline)",
+			p.Budget.MaxRuntimeMinutes))
+	}
+	// Token/usd caps depend on adapter support.
 	if p.Budget.MaxTokens > 0 || p.Budget.MaxUSD > 0 {
 		r.UnsupportedModes = append(r.UnsupportedModes, "budget.max_tokens and budget.max_usd depend on adapter/provider support; reported as unknown when unavailable")
 	}
