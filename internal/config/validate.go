@@ -100,9 +100,13 @@ func (p Policy) Check() CheckResult {
 	// again, which is exactly how they came to disagree in the first place. Zero
 	// keeps its documented meaning of "no deadline"; only below zero is refused,
 	// because that is the value no reading of the policy can honour.
+	//
+	// Single-line, like every error here: run, exec, and k8s render print these
+	// with warn(), which renders the string flat, so a newline would land as an
+	// unprefixed line that reads as stray prose rather than as this error's fix.
 	if p.Budget.MaxRuntimeMinutes < 0 {
 		r.Errors = append(r.Errors, fmt.Sprintf(
-			"budget.max_runtime_minutes is %d; a wall-clock budget cannot be negative.\nSet it to the number of minutes a run may take, or to 0 for no deadline at all; Andbo will not guess which of those a negative meant.",
+			"budget.max_runtime_minutes %d is invalid (expected: 0 or more, where 0 means no deadline)",
 			p.Budget.MaxRuntimeMinutes))
 	}
 	// Token/usd caps depend on adapter support.

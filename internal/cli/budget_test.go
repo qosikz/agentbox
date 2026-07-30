@@ -294,6 +294,24 @@ func TestEverySurfaceRefusesANegativeBudget(t *testing.T) {
 	}
 }
 
+// run, exec, and k8s render print policy errors with warn(), which prefixes
+// "! " and renders the message flat. A newline inside one therefore lands as a
+// line carrying no prefix and no indent — it reads as an unattributed sentence
+// between the errors, not as the fix for the error above it. Asserted on the
+// stream the user actually reads, because the returned error says only "policy
+// andbo.yaml is invalid".
+func TestTheNegativeBudgetRefusalRendersAsOneLine(t *testing.T) {
+	budgetProject(t, "-30")
+	shown, _ := captureStderr(t, func() error {
+		return NewRoot("test", "none", "now").cmdRun(context.Background(), []string{"fix failing tests", "--dry-run"})
+	})
+	for _, line := range strings.Split(strings.TrimRight(shown, "\n"), "\n") {
+		if line != "" && !strings.HasPrefix(line, "! ") {
+			t.Errorf("stderr line is not marked as a warning, so it reads as stray prose:\n%q\nfull stderr:\n%s", line, shown)
+		}
+	}
+}
+
 // policy check is the gate a pipeline runs before anything executes, so its
 // verdict has to be the refusal and not a clean bill of health — on both output
 // paths, which are separate returns that could disagree.
@@ -309,11 +327,6 @@ func TestPolicyCheckReportsTheNegativeBudgetRefusal(t *testing.T) {
 		}
 		if strings.Contains(out, "✓ Policy valid") {
 			t.Errorf("report calls the policy valid:\n%s", out)
-		}
-		// The fix line is a continuation of its bullet, not a stray unindented
-		// line in the middle of the error list.
-		if !strings.Contains(out, "\n    Set it to") {
-			t.Errorf("multi-line error lost its continuation indent:\n%s", out)
 		}
 	})
 

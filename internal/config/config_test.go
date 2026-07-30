@@ -161,6 +161,35 @@ func TestCheckRejectsANegativeRuntimeBudget(t *testing.T) {
 	}
 }
 
+// Check errors have to be single-line. The CLI surfaces that act on a policy —
+// run, exec, k8s render — print each one with warn(), which prefixes "! " and
+// renders the string flat: a newline inside the message becomes a line with no
+// prefix and no indent, reading as an unattributed stray line rather than part
+// of its own error. (`andbo policy check` indents continuations; the other
+// three do not, so the message cannot rely on that.)
+func TestCheckErrorsAreSingleLine(t *testing.T) {
+	p := DefaultPolicy()
+	// Provoke as many errors at once as the checker can produce, so this covers
+	// every message rather than whichever one a future edit happens to add.
+	p.Runtime.Isolation = "bogus"
+	p.Runtime.Engine = "bogus"
+	p.Runtime.Image = ""
+	p.Network.Mode = "bogus"
+	p.Network.Ports = []int{0, 70000}
+	p.Secrets.Mode = "bogus"
+	p.MCP.Mode = "bogus"
+	p.Budget.MaxRuntimeMinutes = -30
+	r := p.Check()
+	if len(r.Errors) < 8 {
+		t.Fatalf("expected every checked field to error, got %d: %v", len(r.Errors), r.Errors)
+	}
+	for _, e := range r.Errors {
+		if strings.Contains(e, "\n") {
+			t.Errorf("error contains a newline, which warn() renders as an orphan line:\n%q", e)
+		}
+	}
+}
+
 // Zero is the documented way to say "no deadline" and stays valid. Pinned next
 // to the refusal so the boundary between them is a decision, not an accident.
 func TestCheckAcceptsZeroAndPositiveRuntimeBudgets(t *testing.T) {
