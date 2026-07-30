@@ -39,12 +39,19 @@ const containerPATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/
 // int64, so one minute costs 6e10 of that range and the product overflows above
 // ~153.7 million minutes (about 292 years).
 //
-// Security: the wrap is silent and lands on either side of the bound. It can
-// produce a window of seconds — the run is then killed early and reported as
-// having "hit budget.max_runtime_minutes", a bound it was never given — or a
-// zero/negative one, which both runners read as no deadline at all (they gate
-// on `if command.Timeout > 0`). Neither is the bound the policy asked for, so
-// values above this are refused rather than converted.
+// Security: the wrap is silent, cyclic, and lands anywhere. 153722867281
+// minutes produced 5.224192s; 2^53 produced exactly 0; 153722868 — the very
+// first value over the bound — produced a large negative. Whatever came out,
+// the run was killed early and reported as having "hit
+// budget.max_runtime_minutes", a bound it was never given.
+//
+// Zero and negative are the worst shape, though not because the run went
+// unbounded: the commands derive the outer context from the MINUTES, so a
+// wrapped-to-zero window still built an already-expired context and the run
+// died at once. What disappeared was the runner-level deadline — local.go and
+// docker.go gate on `if command.Timeout > 0` — leaving the outer context as the
+// only thing bounding the run. No layer delivered the bound the policy asked
+// for, so values above this are refused rather than converted.
 const maxBudgetMinutes = int(math.MaxInt64 / int64(time.Minute))
 
 // budgetWindow converts budget.max_runtime_minutes into the run deadline.

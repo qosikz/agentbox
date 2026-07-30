@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -26,14 +27,17 @@ func budgetProject(t *testing.T, minutes string) string {
 }
 
 // budgetOverflowCases are the budgets whose naive minutes*time.Minute wraps.
-// Each wraps a different way, because each failure mode is different: a small
-// positive window kills the run early under a message naming a bound it never
-// had, and a zero or negative one removes the deadline entirely.
+// The wrap is cyclic, so these are sampled outcomes rather than an ordered
+// progression: 153722868 is the FIRST value over the bound and already lands
+// far negative, while 2^53 lands on exactly zero. Each is kept because the
+// resulting window is a different lie — a few seconds, none at the runner
+// layer, or a negative — and all three were reported as the policy's own bound.
 var budgetOverflowCases = []struct{ name, minutes string }{
-	{"one past the largest representable budget", "153722868"},
+	{"one past the largest representable budget", strconv.Itoa(maxBudgetMinutes + 1)},
 	{"wraps to a few seconds", "153722867281"},
 	{"wraps to exactly zero", "9007199254740992"},
 	{"wraps negative", "200000000000"},
+	{"the largest int64", strconv.FormatInt(math.MaxInt64, 10)},
 }
 
 // assertBudgetRefused checks the refusal is the one a user can act on: the
@@ -53,11 +57,13 @@ func assertBudgetRefused(t *testing.T, err error, minutes string) {
 }
 
 // budgetWindow converts minutes into a time.Duration, which counts NANOSECONDS
-// in an int64: a minute costs 6e10 of that range, so the product wraps above
-// ~153.7 million minutes. A wrapped window is not merely wrong, it can be
-// unenforced — both runners gate on `if command.Timeout > 0`
-// (internal/runtime/local.go, internal/runtime/docker.go), so a budget wrapping
-// to zero or negative silently removes the deadline they exist to apply.
+// in an int64: a minute costs 6e10 of that range, so the product wraps outside
+// ±153.7 million minutes. Both directions are wrong in a way the container and
+// local runners cannot see, because they gate on `if command.Timeout > 0`
+// (internal/runtime/local.go, internal/runtime/docker.go): wrapping to zero or
+// negative drops the deadline at that layer, and wrapping the other way hands
+// them a short window that reads as enforced. Total means every int maps to the
+// bound the policy asked for, or to 0 where it asked for none.
 func TestBudgetWindowIsTotal(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -70,7 +76,9 @@ func TestBudgetWindowIsTotal(t *testing.T) {
 		{"the largest representable budget", int64(maxBudgetMinutes)},
 		{"one past the largest representable budget", int64(maxBudgetMinutes) + 1},
 		// 2^53 minutes * 6e10 ns is exactly 2^64, so the product wraps to ZERO —
-		// and zero is how every runner spells "no deadline".
+		// which is how the local and container runners spell "no deadline".
+		// (The k8s bridge gates on `!= 0` and substitutes its own default, so
+		// zero means something different again over there.)
 		{"wraps to exactly zero", 1 << 53},
 		{"wraps to a few seconds", 153722867281},
 		{"wraps negative", 200000000000},
@@ -81,7 +89,11 @@ func TestBudgetWindowIsTotal(t *testing.T) {
 		{"a negative budget", -1},
 		{"a negative budget wrapping positive", -153722868},
 		{"a negative budget wrapping to a plausible minute", -9007199254740991},
+		// MinInt64 already produced 0 before the clamp — -2^63 * 6e10 is a
+		// multiple of 2^64 — so it pins a coincidence, not the fix. MinInt64+1
+		// is the one that used to come back as a plausible one-minute window.
 		{"the smallest int64", math.MinInt64},
+		{"one above the smallest int64", math.MinInt64 + 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -132,8 +144,8 @@ func TestRunRefusesABudgetItCannotEnforce(t *testing.T) {
 	}
 }
 
-// exec is the same runtime under a different front door, so it must refuse the
-// same policy identically. Its budget kill reports the same claim run's does.
+// exec is the same runtime under a different front door — it derives the same
+// deadline from the same field — so it must refuse the same policy identically.
 func TestExecRefusesABudgetItCannotEnforce(t *testing.T) {
 	for _, tc := range budgetOverflowCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,13 +157,12 @@ func TestExecRefusesABudgetItCannotEnforce(t *testing.T) {
 	}
 }
 
-// The refusal must land before the unsafe confirmation, not after: an
-// unenforceable budget is not something the user should be asked to accept
-// risk for first, and the prompt blocks on stdin in an interactive terminal.
-func TestUnenforceableBudgetIsRefusedBeforeTheUnsafeGate(t *testing.T) {
-	budgetProject(t, "153722867281")
-	// Point stdin at /dev/null so a regression fails fast on EOF instead of
-	// blocking at the prompt when the suite runs in a terminal.
+// silenceStdin points os.Stdin at /dev/null so an unsafe-confirmation prompt
+// reaches EOF immediately. Without it, a regression that let the run past the
+// budget check would BLOCK at the prompt when the suite runs in a terminal
+// instead of failing.
+func silenceStdin(t *testing.T) {
+	t.Helper()
 	devNull, err := os.Open(os.DevNull)
 	if err != nil {
 		t.Fatal(err)
@@ -159,17 +170,35 @@ func TestUnenforceableBudgetIsRefusedBeforeTheUnsafeGate(t *testing.T) {
 	prev := os.Stdin
 	os.Stdin = devNull
 	t.Cleanup(func() { os.Stdin = prev; devNull.Close() })
-
-	r := NewRoot("test", "none", "now")
-	// --runtime local is unsafe and deliberately given WITHOUT --yes-unsafe: if
-	// the budget check ran after the gate, this would fail as unconfirmed-unsafe
-	// rather than naming the budget.
-	err = r.cmdRun(context.Background(), []string{"fix failing tests", "--runtime", "local"})
-	assertBudgetRefused(t, err, "153722867281")
 }
 
-// The boundary itself must still run: the guard rejects what cannot be
-// represented, not what is merely large.
+// The refusal must land before the unsafe confirmation, not after: an
+// unenforceable budget is not something the user should be asked to accept risk
+// for first. Both commands are covered, because --dry-run turns the unsafe gate
+// into a warning and so cannot detect the ordering on its own.
+func TestUnenforceableBudgetIsRefusedBeforeTheUnsafeGate(t *testing.T) {
+	const minutes = "153722867281"
+	// --runtime local is unsafe and deliberately given WITHOUT --yes-unsafe: if
+	// the budget check ran after the gate, these would fail as
+	// unconfirmed-unsafe (exit 8) rather than naming the budget.
+	cases := map[string]func(*Root) error{
+		"run": func(r *Root) error {
+			return r.cmdRun(context.Background(), []string{"fix failing tests", "--runtime", "local"})
+		},
+		"exec": func(r *Root) error { return r.cmdExec(context.Background(), []string{"echo hi", "--runtime", "local"}) },
+	}
+	for name, invoke := range cases {
+		t.Run(name, func(t *testing.T) {
+			budgetProject(t, minutes)
+			silenceStdin(t)
+			assertBudgetRefused(t, invoke(NewRoot("test", "none", "now")), minutes)
+		})
+	}
+}
+
+// The boundary itself must still be accepted: the guard rejects what cannot be
+// represented, not what is merely large. (Dry-run, so this proves the CHECK
+// lets it through — nothing executes under a 292-year window.)
 func TestRunAcceptsTheLargestRepresentableBudget(t *testing.T) {
 	budgetProject(t, strconv.Itoa(maxBudgetMinutes))
 	r := NewRoot("test", "none", "now")
@@ -203,14 +232,84 @@ func TestPolicyCheckRefusesABudgetRunCannotEnforce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			budgetProject(t, tc.minutes)
 			r := NewRoot("test", "none", "now")
-			err := r.cmdPolicy([]string{"check"})
+			out, err := captureStdout(t, func() error { return r.cmdPolicy([]string{"check"}) })
 			// policy check keeps its own contract for an invalid policy (exit 7);
 			// what must not happen is a clean bill of health.
 			if CodeFor(err) != ExitInvalidConfig {
-				t.Fatalf("exit code = %d, want %d (err=%v)", CodeFor(err), ExitInvalidConfig, err)
+				t.Fatalf("exit code = %d, want %d (err=%v)\n%s", CodeFor(err), ExitInvalidConfig, err, out)
+			}
+			// Exit code alone would be satisfied by any unrelated validation
+			// error, so the report has to name this one.
+			for _, needle := range []string{"budget.max_runtime_minutes", tc.minutes, strconv.Itoa(maxBudgetMinutes)} {
+				if !strings.Contains(out, needle) {
+					t.Errorf("report does not name %q:\n%s", needle, out)
+				}
+			}
+			if strings.Contains(out, "✓ Policy valid") {
+				t.Errorf("report calls the policy valid:\n%s", out)
+			}
+			// The fix line is a continuation of its bullet, not a stray
+			// unindented line in the middle of the error list.
+			if !strings.Contains(out, "\n    Lower it in andbo.yaml") {
+				t.Errorf("multi-line error lost its continuation indent:\n%s", out)
 			}
 		})
 	}
+}
+
+// --json is the machine-readable contract a pipeline gates on, and it is a
+// SEPARATE return path from the human one, so an untested budget error there
+// could report exit 0 with valid:false or vice versa.
+func TestPolicyCheckJSONReportsTheBudgetRefusal(t *testing.T) {
+	budgetProject(t, "153722867281")
+	r := NewRoot("test", "none", "now")
+	out, err := captureStdout(t, func() error { return r.cmdPolicy([]string{"check", "--json"}) })
+	if CodeFor(err) != ExitInvalidConfig {
+		t.Fatalf("exit code = %d, want %d (err=%v)\n%s", CodeFor(err), ExitInvalidConfig, err, out)
+	}
+	var got struct {
+		Valid  bool     `json:"valid"`
+		Errors []string `json:"errors"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &got); jerr != nil {
+		t.Fatalf("stdout is not valid JSON (%v):\n%s", jerr, out)
+	}
+	if got.Valid {
+		t.Errorf("valid = true for a budget run and exec refuse:\n%s", out)
+	}
+	if !slicesContainsSubstring(got.Errors, "budget.max_runtime_minutes") {
+		t.Errorf("errors do not name the budget field: %q", got.Errors)
+	}
+}
+
+func slicesContainsSubstring(items []string, needle string) bool {
+	for _, s := range items {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// captureStdout runs fn with os.Stdout redirected to a temp file and returns
+// what it wrote. cmdPolicy prints straight to os.Stdout and Root has no
+// injectable writer, so this is the only way to assert its report.
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	f, ferr := os.CreateTemp(t.TempDir(), "stdout")
+	if ferr != nil {
+		t.Fatal(ferr)
+	}
+	defer f.Close()
+	prev := os.Stdout
+	os.Stdout = f
+	err := fn()
+	os.Stdout = prev
+	data, rerr := os.ReadFile(f.Name())
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	return string(data), err
 }
 
 // run, exec, and k8s render must refuse the same policy the same way. A budget

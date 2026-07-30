@@ -77,12 +77,19 @@ All notable changes to Andbo are documented here.
 - **`andbo run` / `andbo exec`: `budget.max_runtime_minutes` overflowed into a
   window the policy never asked for.** The conversion to a deadline multiplied
   minutes by `time.Minute` unguarded. A `time.Duration` counts nanoseconds in an
-  int64, so above 153,722,867 minutes the product wrapped — three different ways,
-  all silent. `153722867281` became about five seconds: the run was killed almost
-  immediately and told it had "hit budget.max_runtime_minutes (153722867281)", a
-  bound it was never given. `9007199254740992` (2^53) wrapped to exactly **zero**,
-  and both runners treat a zero timeout as *no* timeout (`if command.Timeout > 0`),
-  so the command-level deadline vanished entirely. Larger values wrapped negative.
+  int64, so above 153,722,867 minutes the product wrapped. The wrap is cyclic,
+  not ordered — `153722868`, the very first value over the bound, already lands
+  far negative, while `9007199254740992` (2^53) lands on exactly **zero** — and
+  every landing was silent. `153722867281` became `5.224192s`: the run was killed
+  almost immediately and told it had "hit budget.max_runtime_minutes
+  (153722867281)", a bound it was never given.
+
+  Zero and negative windows were the worst shape, though the run never went
+  *unbounded*: both commands derive the outer run context from the **minutes**, so
+  a wrapped-to-zero window still produced an already-expired context and the run
+  died at once. What disappeared was the deadline one layer down — `local.go` and
+  `docker.go` gate on `if command.Timeout > 0` — leaving the outer context as the
+  only bound. No layer delivered what the policy asked for.
   `andbo k8s render` already refused these; `run` and `exec` did not.
 
   Both commands now refuse a budget above the representable maximum with exit `2`

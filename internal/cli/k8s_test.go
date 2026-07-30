@@ -611,13 +611,16 @@ func TestK8sRenderBudgetOverCapNamesThePolicyField(t *testing.T) {
 		minutes string
 	}{
 		{"over the cap", "1500"},
-		// minutes * time.Minute overflows int64 and wraps to a few seconds, so a
-		// cap checked on the DURATION passes and a manifest renders with a
-		// deadline of about six seconds: a silent downgrade of the exact bound
-		// the check exists to enforce.
-		{"overflows to a small positive duration", "153722867281"},
-		// Wraps negative.
-		{"overflows past zero", "200000000000"},
+		// These two are the reason the cap is compared in MINUTES. minutes *
+		// time.Minute used to wrap: this one became 5.224192s, passed a cap
+		// checked on the DURATION, and rendered a clean manifest whose Job
+		// Kubernetes kills six seconds in (deadlineSeconds rounds up) — a silent
+		// downgrade of the exact bound the check exists to enforce. budgetWindow
+		// no longer wraps (see maxBudgetMinutes), and this check must keep
+		// holding without it.
+		{"would have wrapped to a small positive duration", "153722867281"},
+		// Would have wrapped past zero.
+		{"would have wrapped negative", "200000000000"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

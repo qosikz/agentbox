@@ -210,10 +210,10 @@ func k8sRender(args []string, out, errOut io.Writer) error {
 	//
 	// The bound is compared in MINUTES, before any conversion to a Duration, so
 	// it never depends on how that conversion behaves at the extremes. It once
-	// had to: budgetWindow wrapped, 153722867281 minutes became about five
-	// seconds, passed a cap checked on the duration, and rendered a clean
-	// manifest whose Job Kubernetes kills five seconds in — a silent downgrade
-	// of the exact bound this check exists to enforce. The conversion
+	// had to: budgetWindow wrapped, 153722867281 minutes became 5.224192s,
+	// passed a cap checked on the duration, and rendered a clean manifest whose
+	// Job Kubernetes kills six seconds in (deadlineSeconds rounds up) — a silent
+	// downgrade of the exact bound this check exists to enforce. The conversion
 	// is total now (see maxBudgetMinutes); the comparison stays in minutes
 	// because the error has to speak in the units the operator wrote.
 	if mins, cap := ep.Budget.MaxRuntimeMinutes, k8s.MaxActiveDeadlineSeconds/60; mins > cap {
