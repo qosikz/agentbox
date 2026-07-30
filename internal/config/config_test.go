@@ -167,6 +167,13 @@ func TestCheckRejectsANegativeRuntimeBudget(t *testing.T) {
 // prefix and no indent, reading as an unattributed stray line rather than part
 // of its own error. (`andbo policy check` indents continuations; the other
 // three do not, so the message cannot rely on that.)
+//
+// The invariant is layer-local, and deliberately so: it covers the errors Check
+// itself produces, NOT everything that ends up in a CheckResult.Errors slice.
+// cmd_policy appends checkBudgetMinutes' deliberately multi-line error to that
+// same slice, which is fine because only the indenting printer ever sees it —
+// but route that one through a warn() surface later and it grows the identical
+// orphan line, somewhere this test does not look.
 func TestCheckErrorsAreSingleLine(t *testing.T) {
 	p := DefaultPolicy()
 	// Provoke as many errors at once as the checker can produce, so this covers
