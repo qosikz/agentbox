@@ -75,6 +75,7 @@ type podSpec struct {
 	ServiceAccountName           string             `yaml:"serviceAccountName,omitempty"`
 	RuntimeClassName             string             `yaml:"runtimeClassName,omitempty"`
 	SecurityContext              podSecurityContext `yaml:"securityContext"`
+	InitContainers               []container        `yaml:"initContainers,omitempty"`
 	Containers                   []container        `yaml:"containers"`
 	Volumes                      []volume           `yaml:"volumes"`
 }
@@ -227,6 +228,7 @@ func (s JobSpec) Render() (string, error) {
 						FSGroup:        s.RunAsUser,
 						SeccompProfile: seccompProfile{Type: "RuntimeDefault"},
 					},
+					InitContainers: s.initContainers(),
 					Containers: []container{{
 						Name:  containerName,
 						Image: s.Image,
@@ -237,20 +239,8 @@ func (s JobSpec) Render() (string, error) {
 						Args:            s.Args,
 						WorkingDir:      s.WorkingDir,
 						Env:             sortedEnv(s.Env),
-						Resources: resourceRequirements{
-							Requests: resourceList{CPU: s.CPURequest, Memory: s.MemoryRequest},
-							Limits:   resourceList{CPU: s.CPULimit, Memory: s.MemoryLimit},
-						},
-						SecurityContext: containerSecurityContext{
-							AllowPrivilegeEscalation: false,
-							Privileged:               false,
-							ReadOnlyRootFilesystem:   true,
-							RunAsNonRoot:             true,
-							RunAsUser:                s.RunAsUser,
-							RunAsGroup:               s.RunAsUser,
-							Capabilities:             capabilities{Drop: []string{"ALL"}},
-							SeccompProfile:           seccompProfile{Type: "RuntimeDefault"},
-						},
+						Resources:       s.resources(),
+						SecurityContext: s.containerSecurityContext(),
 						// The two writable mounts are what make
 						// readOnlyRootFilesystem workable for a real agent.
 						VolumeMounts: []volumeMount{
@@ -268,6 +258,80 @@ func (s JobSpec) Render() (string, error) {
 	}
 
 	return encodeDocs(np, j)
+}
+
+// resources and containerSecurityContext are shared by the agent container and
+// the workspace init container. They are methods rather than duplicated
+// literals so the init container's hardening cannot drift from the agent's —
+// an init container runs in the same pod with the same volumes, so a weaker
+// context there would be a weaker context for the whole run.
+func (s JobSpec) resources() resourceRequirements {
+	return resourceRequirements{
+		Requests: resourceList{CPU: s.CPURequest, Memory: s.MemoryRequest},
+		Limits:   resourceList{CPU: s.CPULimit, Memory: s.MemoryLimit},
+	}
+}
+
+func (s JobSpec) containerSecurityContext() containerSecurityContext {
+	return containerSecurityContext{
+		AllowPrivilegeEscalation: false,
+		Privileged:               false,
+		ReadOnlyRootFilesystem:   true,
+		RunAsNonRoot:             true,
+		RunAsUser:                s.RunAsUser,
+		RunAsGroup:               s.RunAsUser,
+		Capabilities:             capabilities{Drop: []string{"ALL"}},
+		SeccompProfile:           seccompProfile{Type: "RuntimeDefault"},
+	}
+}
+
+// initContainers renders the workspace transport. For WorkspaceEmpty there is
+// nothing to do and the field is omitted entirely.
+//
+// For WorkspaceFromImage a single init container copies the image-carried
+// workspace into the writable emptyDir before the agent starts. Notes on the
+// shape, all of them load-bearing:
+//
+//   - The command is EXEC FORM with no shell. A shell would turn both paths
+//     into script text, so a directory name containing ';' or '$(...)' would
+//     become a command. Validation already constrains the path, but not
+//     running a shell is what makes that class of bug structurally impossible.
+//   - "--" ends option parsing for the same reason: validation requires both
+//     paths to be absolute, but the separator means a path can never be read as
+//     a cp flag even if that check is ever loosened.
+//   - It uses the SAME image as the agent, so a digest-pinned spec has exactly
+//     one image to audit and the workspace cannot come from a second source.
+//   - It carries no Env: the init container never needs one, and Env is where
+//     this codebase's secrets would otherwise appear.
+//   - It mounts only the workspace volume — it has no reason to touch the
+//     agent's scratch space.
+//   - "-R", NOT "-a", and no other preserve flag. kubelet creates the emptyDir
+//     owned by root and fsGroup only changes its GROUP, so the volume root
+//     keeps uid 0 no matter what runAsUser and fsGroup are set to. Any preserve
+//     flag makes coreutils treat a failure to copy the DESTINATION directory's
+//     metadata as fatal, and setting a directory's timestamps needs ownership
+//     (utimensat), not write permission — so `cp -a` exits 1 on a real cluster
+//     even though every file copied, and the failed init container takes the
+//     whole Job down. `-R` still copies modes, dotfiles such as .git, and
+//     symlinks as symlinks; it drops mtimes, which costs one slower `git
+//     status` while git rebuilds its stat cache.
+//   - The trailing "/." copies the CONTENTS of the source, including dotfiles,
+//     into an existing destination directory.
+func (s JobSpec) initContainers() []container {
+	if s.WorkspaceTransport != WorkspaceFromImage {
+		return nil
+	}
+	return []container{{
+		Name:            initContainerName,
+		Image:           s.Image,
+		ImagePullPolicy: "Always",
+		Command:         []string{"cp"},
+		Args:            []string{"-R", "--", s.ImageWorkspacePath + "/.", s.WorkingDir},
+		WorkingDir:      s.WorkingDir,
+		Resources:       s.resources(),
+		SecurityContext: s.containerSecurityContext(),
+		VolumeMounts:    []volumeMount{{Name: workspaceVolume, MountPath: s.WorkingDir}},
+	}}
 }
 
 // encodeDocs marshals documents into one YAML stream. Marshalling typed structs
