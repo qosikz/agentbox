@@ -1,0 +1,91 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fix-tests-deny-all
+  namespace: andbo-runs
+  labels:
+    app.kubernetes.io/instance: fix-tests
+    app.kubernetes.io/managed-by: andbo
+    app.kubernetes.io/name: andbo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: fix-tests
+      app.kubernetes.io/name: andbo
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fix-tests
+  namespace: andbo-runs
+  labels:
+    app.kubernetes.io/instance: fix-tests
+    app.kubernetes.io/managed-by: andbo
+    app.kubernetes.io/name: andbo
+spec:
+  backoffLimit: 0
+  completions: 1
+  parallelism: 1
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: fix-tests
+        app.kubernetes.io/managed-by: andbo
+        app.kubernetes.io/name: andbo
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      hostNetwork: false
+      hostPID: false
+      hostIPC: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: ghcr.io/qosikz/andbo/runtime:latest
+          imagePullPolicy: Always
+          command:
+            - andbo-agent
+          workingDir: /work
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: workspace
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: workspace
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

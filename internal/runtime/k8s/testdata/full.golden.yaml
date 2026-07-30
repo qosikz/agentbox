@@ -1,0 +1,103 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fix-tests-deny-all
+  namespace: andbo-runs
+  labels:
+    app.kubernetes.io/instance: fix-tests
+    app.kubernetes.io/managed-by: andbo
+    app.kubernetes.io/name: andbo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: fix-tests
+      app.kubernetes.io/name: andbo
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fix-tests
+  namespace: andbo-runs
+  labels:
+    app.kubernetes.io/instance: fix-tests
+    app.kubernetes.io/managed-by: andbo
+    app.kubernetes.io/name: andbo
+spec:
+  backoffLimit: 0
+  completions: 1
+  parallelism: 1
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: fix-tests
+        app.kubernetes.io/managed-by: andbo
+        app.kubernetes.io/name: andbo
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      hostNetwork: false
+      hostPID: false
+      hostIPC: false
+      serviceAccountName: andbo-agent
+      runtimeClassName: gvisor
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: ghcr.io/qosikz/andbo/runtime:latest
+          imagePullPolicy: Always
+          command:
+            - andbo-agent
+          args:
+            - --task
+            - fix failing tests
+          workingDir: /workspace
+          env:
+            - name: ANDBO_RUN_ID
+              value: 01J0
+            - name: ANDBO_TASK
+              value: fix failing tests
+            - name: CI
+              value: "true"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: workspace
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
