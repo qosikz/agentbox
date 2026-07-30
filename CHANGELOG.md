@@ -2,6 +2,39 @@
 
 All notable changes to Andbo are documented here.
 
+## Unreleased
+
+### Added
+- **Kubernetes runner, slice 0: hardened manifest rendering contract**
+  (`internal/runtime/k8s`). Renders a batch/v1 Job plus a default-deny
+  `NetworkPolicy` that selects that Job's pod, for an external scheduler (or a
+  future Andbo Kubernetes backend) to apply. Secure by construction: non-root,
+  `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, capabilities
+  dropped to `ALL`, seccomp `RuntimeDefault`,
+  `automountServiceAccountToken: false`, `enableServiceLinks: false`, no
+  privileged mode, no host namespaces, and size-limited `emptyDir` as the only
+  volume source. Resources, `activeDeadlineSeconds`, and
+  `ttlSecondsAfterFinished` are all required and bounded. `RuntimeClassName`
+  and `ServiceAccountName` are rendered only when explicitly requested.
+  `FromRuntimeSpec` maps the existing container `RuntimeSpec`/`CommandSpec`,
+  and its main job is refusal: only `Image`, `NetworkMode`, `User`,
+  `Executable`, `Args`, and `Timeout` cross the boundary. Everything
+  host-derived fails closed with an actionable error — bind mounts, the host
+  working directory, and the resolved host environment (which carries secret
+  values, and which this renderer could only inline as plain text).
+
+  There is **no CLI surface and no cluster interaction** in this slice: the
+  package renders and validates only. Domain allowlisting is **not** implemented
+  for Kubernetes — `network.mode=allowlist` and `open` are rejected rather than
+  silently downgraded, since NetworkPolicy selects by IP/namespace/pod, not by
+  domain. `JobSpec.EnforcementNotes()` states what the manifests do **not**
+  guarantee, including that NetworkPolicies are additive (another policy in the
+  namespace, or a cluster-scoped `AdminNetworkPolicy`, can grant egress this one
+  cannot remove), that the policy must outlive the pod and is not
+  garbage-collected with the Job, that `backoffLimit: 0` is not at-most-once
+  execution, and that `$HOME` is not writable under the read-only root
+  filesystem.
+
 ## v0.6.0 — 2026-06-13 (renamed to Andbo)
 
 ### Renamed
