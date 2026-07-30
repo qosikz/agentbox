@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,9 +34,64 @@ var minimalSafeEnv = []string{"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL
 // can reveal usernames/layout, and would shadow the image's own binaries.
 const containerPATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
+// maxBudgetMinutes is the largest budget.max_runtime_minutes that converts to a
+// run deadline without wrapping. A time.Duration counts NANOSECONDS in an
+// int64, so one minute costs 6e10 of that range and the product overflows above
+// ~153.7 million minutes (about 292 years).
+//
+// Security: the wrap is silent, cyclic, and lands anywhere. 153722867281
+// minutes produced 5.224192s; 2^53 produced exactly 0; 153722868 — the very
+// first value over the bound — produced a large negative. Whatever came out,
+// the run was killed early and reported as having "hit
+// budget.max_runtime_minutes", a bound it was never given.
+//
+// Zero and negative are the worst shape, though not because the run went
+// unbounded: the commands derive the outer context from the MINUTES, so a
+// wrapped-to-zero window still built an already-expired context and the run
+// died at once. What disappeared was the runner-level deadline — local.go and
+// docker.go gate on `if command.Timeout > 0` — leaving the outer context as the
+// only thing bounding the run. No layer delivered the bound the policy asked
+// for, so values above this are refused rather than converted.
+const maxBudgetMinutes = int(math.MaxInt64 / int64(time.Minute))
+
 // budgetWindow converts budget.max_runtime_minutes into the run deadline.
 // It is a variable so tests can shrink the window to milliseconds.
-var budgetWindow = func(minutes int) time.Duration { return time.Duration(minutes) * time.Minute }
+//
+// Neither guard is reachable through the commands: they gate on `> 0` and
+// refuse an oversized budget up front (checkBudgetMinutes). Both stay because
+// the conversion must be total for a caller added later — which is exactly how
+// run and exec came to differ from k8s render.
+//
+// The negative half matters as much as the positive one, and wraps the wrong
+// way: -9007199254740991 minutes multiplies out to a plausible ONE-MINUTE
+// window, which passes the runners' `Timeout > 0` gate and so reads as
+// enforced. At or below zero is how the policy spells "no deadline", so that is
+// what the conversion returns.
+var budgetWindow = func(minutes int) time.Duration {
+	if minutes <= 0 {
+		return 0
+	}
+	if minutes > maxBudgetMinutes {
+		return time.Duration(maxBudgetMinutes) * time.Minute
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+// checkBudgetMinutes refuses a budget that cannot be turned into the deadline
+// the policy asks for.
+//
+// This is a policy violation and not a configuration typo: the value parses,
+// and what cannot be delivered is the enforcement. It therefore carries the
+// same exit code `andbo k8s render` uses when a budget exceeds what a Job's
+// activeDeadlineSeconds can express, so one CI gate catches both.
+func checkBudgetMinutes(minutes int, policyPath string) error {
+	if minutes <= maxBudgetMinutes {
+		return nil
+	}
+	return codedf(ExitPolicyViolation,
+		"budget.max_runtime_minutes is %d, which exceeds the %d-minute maximum Andbo can hold as a run deadline (durations are nanoseconds in a 64-bit integer).\nLower it in %s to at most %d, or set it to 0 to run with no deadline at all; Andbo will not start a run under a bound it would have to invent.",
+		minutes, maxBudgetMinutes, policyPath, maxBudgetMinutes)
+}
 
 func (r *Root) cmdRun(ctx context.Context, args []string) error {
 	o, err := parseRunFlags(args)
@@ -80,6 +136,13 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 		AllowDockerSocket: o.allowDockerSocket, YesUnsafe: o.yesUnsafe,
 	}
 	ep := policy.BuildEffectivePolicy(cfg, o.policy, ov)
+
+	// A budget too large to become a deadline is refused before anything runs,
+	// and before the unsafe prompt: the user is never asked to accept risk for
+	// a run that cannot start under the bound they wrote.
+	if err := checkBudgetMinutes(ep.Budget.MaxRuntimeMinutes, o.policy); err != nil {
+		return err
+	}
 
 	// 2. Gate unsafe modes. Dry-run never executes, so it only warns.
 	if ep.RequiresUnsafeConfirmation() {

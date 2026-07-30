@@ -24,7 +24,7 @@ All notable changes to Andbo are documented here.
 
   Fail-closed, never downgraded — all exit `2`: `network.mode` `allowlist`/`open`,
   `runtime.isolation: local`, `budget.max_runtime_minutes` above the cap (bounded
-  in **minutes**, before the conversion to a duration that overflows), and an
+  in **minutes**, so the check never depends on the duration conversion), and an
   agent that needs environment variables of its own (`goose` sets `GOOSE_MODE`;
   nothing but `HOME` crosses into a Job) are each rejected with an error naming
   where the workload *can* run. A `--policy` path that does not exist is an error
@@ -74,6 +74,40 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **`andbo run` / `andbo exec`: `budget.max_runtime_minutes` overflowed into a
+  window the policy never asked for.** The conversion to a deadline multiplied
+  minutes by `time.Minute` unguarded. A `time.Duration` counts nanoseconds in an
+  int64, so above 153,722,867 minutes the product wrapped. The wrap is cyclic,
+  not ordered — `153722868`, the very first value over the bound, already lands
+  far negative, while `9007199254740992` (2^53) lands on exactly **zero** — and
+  every landing was silent. `153722867281` became `5.224192s`: the run was killed
+  almost immediately and told it had "hit budget.max_runtime_minutes
+  (153722867281)", a bound it was never given.
+
+  Zero and negative windows were the worst shape, though the run never went
+  *unbounded*: both commands derive the outer run context from the **minutes**, so
+  a wrapped-to-zero window still produced an already-expired context and the run
+  died at once. What disappeared was the deadline one layer down — `local.go` and
+  `docker.go` gate on `if command.Timeout > 0` — leaving the outer context as the
+  only bound. No layer delivered what the policy asked for.
+  `andbo k8s render` already refused these; `run` and `exec` did not.
+
+  Both commands now refuse a budget above the representable maximum with exit `2`
+  — the same policy-violation code `k8s render` uses for a budget it cannot bound
+  — naming the value, the maximum, and the file to change. The refusal lands
+  before the unsafe confirmation, so nobody is asked to accept risk for a run that
+  cannot start. `andbo policy check` reports the same budget as an error (under
+  its own exit `7`), so the gate a pipeline runs *before* a run no longer passes a
+  policy the run will reject.
+
+  The conversion itself was made total in both directions. The negative half
+  wrapped too, and wrapped the wrong way: `-9007199254740991` minutes multiplied
+  out to a plausible **one-minute** window, which passes the runners' `Timeout > 0`
+  gate and so reads as enforced. `0` — or any value below it — is how the policy
+  spells "no deadline", so that is now exactly what the conversion returns.
+  Unreachable through the commands, which gate on `> 0`; it is there so a call
+  site added later cannot resurrect the defect, which is how `run` and `exec` came
+  to differ from `k8s render` in the first place.
 - **Kubernetes renderer: host-workspace leak check matched substrings, not
   paths.** `FromRuntimeSpec` refused any argv containing the workspace path, via
   `strings.Contains`. That was harmless while the only caller passed a long,
