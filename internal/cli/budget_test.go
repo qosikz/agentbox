@@ -320,6 +320,13 @@ func TestTheNegativeBudgetRefusalRendersAsOneLine(t *testing.T) {
 	shown, _ := captureStderr(t, func() error {
 		return NewRoot("test", "none", "now").cmdRun(context.Background(), []string{"fix failing tests", "--dry-run"})
 	})
+	// Checked before the loop, because an empty stream splits to [""] and the
+	// loop skips it — leaving this asserting nothing at all. "the refusal stopped
+	// reaching stderr" is one of the regressions this test exists to catch, and
+	// that is exactly the shape that would silence it.
+	if !strings.Contains(shown, "budget.max_runtime_minutes") {
+		t.Fatalf("the refusal never reached stderr, so there is nothing to render:\n%q", shown)
+	}
 	for _, line := range strings.Split(strings.TrimRight(shown, "\n"), "\n") {
 		if line != "" && !strings.HasPrefix(line, "! ") {
 			t.Errorf("stderr line is not marked as a warning, so it reads as stray prose:\n%q\nfull stderr:\n%s", line, shown)
