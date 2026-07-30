@@ -208,12 +208,14 @@ func k8sRender(args []string, out, errOut io.Writer) error {
 	// error speaks the user's vocabulary. The bridge sees a "command timeout"
 	// the user never wrote, and names neither the field nor the file.
 	//
-	// The bound is compared in MINUTES, before any conversion to a Duration.
-	// budgetWindow multiplies by time.Minute without an overflow guard, so a
-	// large enough value wraps: 153722867281 minutes becomes about six seconds,
-	// passes a cap checked on the duration, and renders a clean manifest whose
-	// Job Kubernetes kills after six seconds — a silent downgrade of the exact
-	// bound this check exists to enforce.
+	// The bound is compared in MINUTES, before any conversion to a Duration, so
+	// it never depends on how that conversion behaves at the extremes. It once
+	// had to: budgetWindow wrapped, 153722867281 minutes became about six
+	// seconds, passed a cap checked on the duration, and rendered a clean
+	// manifest whose Job Kubernetes kills after six seconds — a silent
+	// downgrade of the exact bound this check exists to enforce. The conversion
+	// is total now (see maxBudgetMinutes); the comparison stays in minutes
+	// because the error has to speak in the units the operator wrote.
 	if mins, cap := ep.Budget.MaxRuntimeMinutes, k8s.MaxActiveDeadlineSeconds/60; mins > cap {
 		return codedf(ExitPolicyViolation,
 			"budget.max_runtime_minutes is %d, which exceeds the %d-minute cap on the Job's activeDeadlineSeconds.\nLower it in %s to at most %d; nothing local supervises a pod, so a run this renderer cannot bound would occupy the cluster until someone notices.",

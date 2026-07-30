@@ -66,6 +66,12 @@ func (r *Root) cmdExec(ctx context.Context, args []string) error {
 	}
 	ep := policy.BuildEffectivePolicy(cfg, o.policy, ov)
 
+	// Same refusal as run, in the same place: exec shares the deadline, so it
+	// must share the bound on what that deadline can hold.
+	if err := checkBudgetMinutes(ep.Budget.MaxRuntimeMinutes, o.policy); err != nil {
+		return err
+	}
+
 	if ep.RequiresUnsafeConfirmation() {
 		if o.dryRun {
 			warn("unsafe options are set; a real exec would require confirmation:")

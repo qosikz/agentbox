@@ -24,7 +24,7 @@ All notable changes to Andbo are documented here.
 
   Fail-closed, never downgraded — all exit `2`: `network.mode` `allowlist`/`open`,
   `runtime.isolation: local`, `budget.max_runtime_minutes` above the cap (bounded
-  in **minutes**, before the conversion to a duration that overflows), and an
+  in **minutes**, so the check never depends on the duration conversion), and an
   agent that needs environment variables of its own (`goose` sets `GOOSE_MODE`;
   nothing but `HOME` crosses into a Job) are each rejected with an error naming
   where the workload *can* run. A `--policy` path that does not exist is an error
@@ -74,6 +74,24 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **`andbo run` / `andbo exec`: `budget.max_runtime_minutes` overflowed into a
+  window the policy never asked for.** The conversion to a deadline multiplied
+  minutes by `time.Minute` unguarded. A `time.Duration` counts nanoseconds in an
+  int64, so above 153,722,867 minutes the product wrapped — three different ways,
+  all silent. `153722867281` became about five seconds: the run was killed almost
+  immediately and told it had "hit budget.max_runtime_minutes (153722867281)", a
+  bound it was never given. `9007199254740992` (2^53) wrapped to exactly **zero**,
+  and both runners treat a zero timeout as *no* timeout (`if command.Timeout > 0`),
+  so the command-level deadline vanished entirely. Larger values wrapped negative.
+  `andbo k8s render` already refused these; `run` and `exec` did not.
+
+  Both commands now refuse a budget above the representable maximum with exit `2`
+  — the same policy-violation code `k8s render` uses for a budget it cannot bound
+  — naming the value, the maximum, and the file to change. The refusal lands
+  before the unsafe confirmation, so nobody is asked to accept risk for a run that
+  cannot start. The conversion itself was also made total, so no future caller can
+  obtain a wrapped window. `0` (or below) still means "no deadline" for `run` and
+  `exec`, unchanged.
 - **Kubernetes renderer: host-workspace leak check matched substrings, not
   paths.** `FromRuntimeSpec` refused any argv containing the workspace path, via
   `strings.Contains`. That was harmless while the only caller passed a long,
