@@ -80,18 +80,23 @@ import "fmt"
 //     container next.
 //   - Both values are pinned in the MANIFEST and only one of them stays pinned
 //     in the CLUSTER, which is the bound a reader of this guard is most likely
-//     to assume away. restartPolicy rides in spec.template, and the update path
-//     holds the whole template immutable while the Job is not suspended, so the
-//     kubelet's in-place restarts cannot be turned back on after the apply.
-//     backoffLimit appears in none of that path's immutable-field checks — those
-//     name selector, completionMode, podFailurePolicy, backoffLimitPerIndex,
-//     managedBy and successPolicy — so an update raises it, and the Job
-//     controller compares the raised value on its next sync. The one thing that
-//     ends the exposure is the run ending: a Job carrying a Failed condition is
-//     skipped before the controller reads the spec, so a Job already failed on
-//     BackoffLimitExceeded cannot be re-armed. This guard runs at render time
-//     and can say none of that; EnforcementNotes does, and
-//     TestSecurity_NoRetryBoundsAreStated pins the wording.
+//     to assume away. restartPolicy rides in spec.template, and EVERY branch of
+//     the update path ends in an immutability check on the template — while the
+//     Job is suspended the only exemptions are container resources and the
+//     scheduling directives, neither of which reaches restartPolicy — so the
+//     kubelet's in-place restarts cannot be turned back on at all. backoffLimit
+//     appears in none of that path's ValidateImmutableField calls, so an update
+//     raises it and the Job controller compares the raised value on its next
+//     sync. The one thing that ends the exposure is the run ending: a Job
+//     carrying a Complete or Failed condition is skipped before the controller
+//     reads the retry budget, so a Job already failed on BackoffLimitExceeded
+//     cannot be re-armed. Do not read the reverse into that. A Job the
+//     controller has not finished can be made to run the agent again WITHOUT
+//     touching backoffLimit, because the controller's own pod deletions are not
+//     counted as failures at all — see the third bound on
+//     runsOnePodWithFreshImages, which is where that mechanism is written down.
+//     This guard runs at render time and can say none of it; EnforcementNotes
+//     does, and TestSecurity_NoRetryBoundsAreStated pins the wording.
 //   - This is not at-most-once EXECUTION, and no field in this manifest can be.
 //     It refuses the retries Andbo would ask for; node failure, preemption, and
 //     pod deletion still start the same run a second time, and nothing stops the
