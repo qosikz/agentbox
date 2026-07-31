@@ -488,7 +488,7 @@ func TestK8sRenderNotesDoNotOverclaim(t *testing.T) {
 
 // k8sNoteNeedles are the caveats that must survive in every output mode. The
 // CLI-layer ones matter most: they are the notes a change to the note plumbing
-// would silently drop, leaving only the renderer's 18 and a passing count.
+// would silently drop, leaving only the renderer's 21 and a passing count.
 var k8sNoteNeedles = []string{
 	// CNI dependency — the k8s package's own note, surfaced by the CLI.
 	"NetworkPolicy",

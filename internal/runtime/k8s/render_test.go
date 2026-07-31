@@ -221,6 +221,43 @@ func TestRender_NetworkPolicySelectorMatchesPod(t *testing.T) {
 	}
 }
 
+// TestRender_PodIsNotHandedTheClusterResolver is the DNS half of the isolation
+// the NetworkPolicy provides. Left at its default, dnsPolicy is ClusterFirst,
+// and the kubelet writes the kube-dns ClusterIP plus the cluster search domains
+// into the pod's /etc/resolv.conf — the discovery route that runs alongside the
+// environment one enableServiceLinks: false narrows.
+func TestRender_PodIsNotHandedTheClusterResolver(t *testing.T) {
+	got, err := goldenSpec(t).Render()
+	if err != nil {
+		t.Fatalf("Render() = %v, want nil", err)
+	}
+	pod := dig(t, docs(t, got)[1], "spec", "template", "spec").(map[string]any)
+
+	if v := pod["dnsPolicy"]; v != "None" {
+		t.Errorf("dnsPolicy = %v, want None; the ClusterFirst default points the pod at kube-dns", v)
+	}
+	// dnsPolicy None without a dnsConfig is rejected by the API server, so the
+	// two are one field as far as this contract is concerned.
+	cfg, ok := pod["dnsConfig"].(map[string]any)
+	if !ok {
+		t.Fatalf("dnsConfig is not a mapping (got %v); dnsPolicy None is invalid without one", pod["dnsConfig"])
+	}
+	ns, ok := cfg["nameservers"].([]any)
+	if !ok || len(ns) != 1 || ns[0] != "127.0.0.1" {
+		t.Errorf("dnsConfig.nameservers = %v, want [127.0.0.1]: the pod's own loopback, which cannot route off the pod", cfg["nameservers"])
+	}
+	// Absent by construction. A search list is how svc.cluster.local comes back,
+	// and neither key has a rendered form to set.
+	for _, key := range []string{"searches", "options"} {
+		if _, present := cfg[key]; present {
+			t.Errorf("dnsConfig.%s must not be rendered, got %v", key, cfg[key])
+		}
+	}
+	if strings.Contains(got, "cluster.local") {
+		t.Errorf("manifest names a cluster search domain:\n%s", got)
+	}
+}
+
 func TestRender_JobHardening(t *testing.T) {
 	got, err := goldenSpec(t).Render()
 	if err != nil {

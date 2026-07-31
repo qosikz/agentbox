@@ -41,6 +41,10 @@ spec:
       restartPolicy: Never
       automountServiceAccountToken: false
       enableServiceLinks: false
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+          - 127.0.0.1
       hostNetwork: false
       hostPID: false
       hostIPC: false
