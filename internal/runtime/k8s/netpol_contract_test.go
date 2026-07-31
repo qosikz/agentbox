@@ -203,6 +203,36 @@ func TestSecurity_NoOtherFieldCanPunchAHoleInTheDenyAll(t *testing.T) {
 // egress rules, which is the same "empty is not neutral" defaulting that
 // runsOnePodWithFreshImages refuses for imagePullPolicy.
 func TestDeniesEveryDirection(t *testing.T) {
+	for _, tt := range denyAllGuardCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			err := deniesEveryDirection(tt.np)
+			if tt.substr == "" {
+				if err != nil {
+					t.Fatalf("deniesEveryDirection() = %v, want nil for a policy that denies both directions", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("deniesEveryDirection() = nil; a policy that does not deny both directions would leave the agent reachable, or free to reach out, while still reading as a default-deny")
+			}
+			if !strings.Contains(err.Error(), tt.substr) {
+				t.Errorf("error %q does not name what went wrong (want it to mention %q)", err, tt.substr)
+			}
+		})
+	}
+}
+
+type denyAllGuardCase struct {
+	name   string
+	np     networkPolicy
+	substr string // empty means the policy denies both ways and must render
+}
+
+// denyAllGuardCases is one row per refusal branch of deniesEveryDirection, plus
+// the accepting case. It is shared with
+// TestSecurity_GuardRefusalsAreDistinguishable, which is what keeps the substrings
+// honest — see there.
+func denyAllGuardCases() []denyAllGuardCase {
 	policy := func(types ...string) networkPolicy {
 		return networkPolicy{
 			Metadata: objectMeta{Name: "fix-tests-deny-all", Namespace: "andbo-runs"},
@@ -210,11 +240,7 @@ func TestDeniesEveryDirection(t *testing.T) {
 		}
 	}
 
-	tests := []struct {
-		name   string
-		np     networkPolicy
-		substr string // empty means the policy denies both ways and must render
-	}{
+	return []denyAllGuardCase{
 		{
 			name: "denies both directions",
 			np:   policy("Ingress", "Egress"),
@@ -265,9 +291,17 @@ func TestDeniesEveryDirection(t *testing.T) {
 			substr: "want exactly once",
 		},
 		{
+			// The %q quoting is load-bearing and a bare "does not name" was not
+			// enough. The EGRESS branch's prose says "a list of at most two that
+			// does not name Egress once", so this row's substring was satisfied
+			// by the other branch's message — and review turned that into a
+			// surviving mutation: `if egress != 1 || ingress == 0` makes the
+			// ingress branch dead code, routes this input into the egress
+			// branch, and leaves every row in this table green. Only the quoted
+			// form appears in one message.
 			name:   "egress only leaves ingress open",
 			np:     policy("Egress"),
-			substr: "does not name",
+			substr: `does not name "Ingress" in policyTypes`,
 		},
 		{
 			// THREE entries, which upstream refuses outright — a different
@@ -296,23 +330,58 @@ func TestDeniesEveryDirection(t *testing.T) {
 			substr: "the only directions a NetworkPolicy has",
 		},
 	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := deniesEveryDirection(tt.np)
-			if tt.substr == "" {
-				if err != nil {
-					t.Fatalf("deniesEveryDirection() = %v, want nil for a policy that denies both directions", err)
+// TestSecurity_GuardRefusalsAreDistinguishable asserts that each substring the
+// table above relies on appears in the message of the branch it was written for
+// AND IN NO OTHER. Without that, a row does not pin the branch it names.
+//
+// This class of defect has now arrived three times in this file by three routes,
+// which is why it gets a structural check rather than a fourth careful reading:
+//
+//   - asserting the offending VALUE, which every message %v-dumps;
+//   - a new branch inserted AHEAD of the counts, whose own %v dump re-satisfied
+//     the rows below it;
+//   - and prose that simply collided. "does not name" read as specific to the
+//     ingress branch and was not: the egress branch says "a list of at most two
+//     that does not name Egress once". Review made that concrete — `if egress
+//     != 1 || ingress == 0` turns the ingress branch into dead code, routes its
+//     input to the egress branch, and the whole suite stayed green.
+//
+// Intent is not checkable; overlap is. Two seconds of execution decides it.
+func TestSecurity_GuardRefusalsAreDistinguishable(t *testing.T) {
+	cases := denyAllGuardCases()
+
+	// Every distinct substring the table asserts on.
+	var substrs []string
+	for _, c := range cases {
+		if c.substr != "" && !slices.Contains(substrs, c.substr) {
+			substrs = append(substrs, c.substr)
+		}
+	}
+	if len(substrs) == 0 {
+		t.Fatal("no substrings in denyAllGuardCases: TestDeniesEveryDirection would assert nothing about which branch refused")
+	}
+
+	for _, c := range cases {
+		if c.substr == "" {
+			continue
+		}
+		err := deniesEveryDirection(c.np)
+		if err == nil {
+			t.Errorf("%s: deniesEveryDirection() = nil, want a refusal", c.name)
+			continue
+		}
+		for _, s := range substrs {
+			got := strings.Contains(err.Error(), s)
+			if want := s == c.substr; got != want {
+				if got {
+					t.Errorf("%s: its refusal also contains %q, which belongs to a different branch — so the row asserting %q does not pin the branch it names, and a mutation that reroutes this input to that other branch would pass:\n%v", c.name, s, s, err)
+				} else {
+					t.Errorf("%s: its refusal does not contain %q:\n%v", c.name, s, err)
 				}
-				return
 			}
-			if err == nil {
-				t.Fatal("deniesEveryDirection() = nil; a policy that does not deny both directions would leave the agent reachable, or free to reach out, while still reading as a default-deny")
-			}
-			if !strings.Contains(err.Error(), tt.substr) {
-				t.Errorf("error %q does not name what went wrong (want it to mention %q)", err, tt.substr)
-			}
-		})
+		}
 	}
 }
 
@@ -320,13 +389,22 @@ func TestDeniesEveryDirection(t *testing.T) {
 // above, in the same terms its siblings state theirs.
 //
 // The existing lifetime note covers DELETION. Deletion is not the only route and
-// it is the LOUDER one: ValidateNetworkPolicyUpdate calls ValidateImmutableField
-// on nothing at all, so a NetworkPolicy has no immutable fields whatever — every
-// part of the spec this package renders can be edited on the live object. The
-// Job at least freezes its pod template; this freezes nothing. Anyone who can
-// update the policy can add an egress rule to it, drop "Egress" from
-// policyTypes, or repoint podSelector, and the object survives with its name,
-// namespace and labels intact — so it still appears bound to the run.
+// it is the LOUDER one: ValidateNetworkPolicyUpdate re-runs ValidateNetworkPolicySpec
+// and pins nothing in it, so a NetworkPolicy has no immutable SPEC fields — every
+// part of the spec this package renders can be edited on the live object, where
+// the Job at least freezes its pod template. Anyone who can update the policy can
+// add an egress rule to it, drop "Egress" from policyTypes, or repoint
+// podSelector, and the object survives with its name, namespace and labels intact
+// — so it still appears bound to the run.
+//
+// That last clause is true BECAUSE the metadata is pinned even though the spec is
+// not: ValidateObjectMetaUpdate runs ValidateImmutableField on name, namespace,
+// uid, creationTimestamp, deletionTimestamp and deletionGracePeriodSeconds. This
+// comment is the sixth place the flat "no immutable fields whatever" claim had to
+// be corrected, and it was the one the first pass missed — the docstring of the
+// test that pins the correction still asserted the falsified version, and made
+// the survival argument without the fact that supports it. A correction that
+// lands in five places and misses the sixth reads as complete.
 func TestSecurity_DenyAllBoundsAreStated(t *testing.T) {
 	// The anchor is the note's SUBJECT, not one of the claims checked below.
 	// Review found the first draft using the immutability claim for both, which
