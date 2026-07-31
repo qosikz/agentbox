@@ -47,6 +47,16 @@ func allContainers(t *testing.T, manifest string) map[string]map[string]any {
 		if !ok || name == "" {
 			t.Fatalf("%s names an image but has no name", path)
 		}
+		// Keying by name means a duplicate would silently replace its twin, and
+		// walk iterates a Go map, so WHICH one survived would vary run to run —
+		// an assertion below could then pass on one CI run and fail on the next
+		// against identical input. Review found exactly that: a colliding
+		// container carrying a bad restart policy was caught on 6 runs of 10.
+		// Fail loudly instead; a pod with two containers of one name is a
+		// manifest this package must never emit in any case.
+		if _, dup := out[name]; dup {
+			t.Fatalf("%s: a second container is named %q; container names must be unique across every list, and this check is keyed by name", path, name)
+		}
 		out[name] = m
 	})
 	if len(out) == 0 {
@@ -247,10 +257,12 @@ func TestRunsOnePodWithFreshImages(t *testing.T) {
 //     failed CONTAINER in place — same pod, same volumes, same workspace. This
 //     is NOT a way round backoffLimit: the Job controller counts in-place
 //     restarts too, and at backoffLimit 0 the first one fails the Job. It is a
-//     matter of ordering. The kubelet restarts immediately and the controller
-//     reacts afterwards, so under OnFailure the agent gets one further start on
-//     the half-written workspace of the failed one before the Job is failed and
-//     the pod (and its logs) destroyed. One extra start, not an unbounded
+//     matter of ordering, and the ordering is causal: RestartCount increments
+//     only once the restart has happened, and during the kubelet's backoff the
+//     pod is Running rather than Failed, so the controller has nothing to count
+//     until the agent has already started again. Under OnFailure it therefore
+//     gets one further start on the half-written workspace of the failed one
+//     before the Job is failed and the pod (and its logs) destroyed. One extra start, not an unbounded
 //     number — and one is enough for a second commit or push. Absence is worse
 //     than a wrong value, because the pod default is Always, which the API
 //     server rejects outright for a Job template — the run then never starts.
@@ -323,14 +335,27 @@ func TestSecurity_NeitherControllerNorKubeletRetriesTheAgent(t *testing.T) {
 //     after which every field asserted here is advisory. backoffLimitPerIndex
 //     and maxFailedIndexes need completionMode Indexed, which is equally
 //     outside the set.
-//   - Containers. Pod-level restartPolicy Never is not the whole restart story:
-//     a CONTAINER may carry its own restartPolicy (Always on an init container
-//     is the native-sidecar form), and the kubelet then restarts that container
-//     in place whatever the pod says. That is the exact mechanism
-//     retriesNothingAfterFailure describes and the exact one it cannot see.
-//     Asserting the key is ABSENT, rather than asserting a value, is what makes
-//     this hold for restartPolicyRules and whatever else lands on a container
-//     next.
+//
+//   - Containers, which are the WORSE half. Pod-level restartPolicy Never is
+//     not the whole restart story: a container may carry its OWN restartPolicy
+//     — on an init container, where Always is the native-sidecar form, and on a
+//     regular container under the newer container-restart rules — and the
+//     kubelet then restarts it in place whatever the pod says. Unlike pod-level
+//     OnFailure, that restart is not counted anywhere:
+//     pastBackoffLimitOnFailure returns early unless the POD-level policy is
+//     OnFailure, so under Never it never sums a RestartCount at all, and the
+//     pod stays Running rather than Failed so the pod-counting path has nothing
+//     either. This is the one axis on which the agent really can be re-run
+//     without bound, and it is exactly the axis retriesNothingAfterFailure
+//     cannot see.
+//
+//     Both the restartPolicy key and the whole container key set are closed,
+//     for the reason the by-name version of this file keeps re-learning: naming
+//     one key catches the field that exists today and nothing else.
+//     restartPolicyRules is the near case — it is invalid without a
+//     restartPolicy beside it, so every VALID form is already caught by the
+//     named check, but a future container field carrying no such dependency
+//     would not be.
 //
 // A legitimate future sidecar would fail this test. That is the intended cost:
 // it is a run the kubelet may restart, and it should not become renderable
@@ -364,9 +389,25 @@ func TestSecurity_NoOtherFieldCanReinstateRetries(t *testing.T) {
 				}
 			}
 
+			// Exactly the fields the container struct declares, closed for the
+			// same reason Job.spec is: naming restartPolicy alone would catch
+			// the field that exists today and miss the next one.
+			allowedOnContainer := map[string]bool{
+				"name": true, "image": true, "imagePullPolicy": true,
+				"command": true, "args": true, "workingDir": true,
+				"env": true, "resources": true, "securityContext": true,
+				"volumeMounts": true,
+			}
+
 			for cname, c := range allContainers(t, manifest) {
 				if v, present := c["restartPolicy"]; present {
-					t.Errorf("container %q declares restartPolicy %v; the kubelet honours a container's own restart policy whatever the pod's Never says, so this container is outside the no-retry contract the pod spec states", cname, v)
+					t.Errorf("container %q declares restartPolicy %v; the kubelet honours a container's own restart policy whatever the pod's Never says, and the Job controller does not count such a restart against backoffLimit at all — pastBackoffLimitOnFailure returns early unless the POD-level policy is OnFailure — so this container could be restarted without bound", cname, v)
+				}
+				for key := range c {
+					if key == "restartPolicy" || allowedOnContainer[key] {
+						continue
+					}
+					t.Errorf("container %q renders %q, which is not part of the contract this package states about containers; if it bears on whether the kubelet may restart this container (restartPolicyRules and whatever succeeds it), decide what it does to the no-retry contract, then add it to this set", cname, key)
 				}
 			}
 		})
@@ -381,10 +422,12 @@ func TestSecurity_NoOtherFieldCanReinstateRetries(t *testing.T) {
 //
 // "Dropped" is deliberately not claimed for both fields. BackoffLimit is a
 // non-pointer int64, so a field that vanishes from the YAML (an added omitempty)
-// still reads as 0 here and passes — this guard cannot tell 0 from absent, and
-// only the presence branch of
-// TestSecurity_NeitherControllerNorKubeletRetriesTheAgent catches that. It IS
-// claimed for RestartPolicy, whose zero value is the empty string refused below.
+// still reads as 0 here and passes — this guard cannot tell 0 from absent. Two
+// tests do catch it, and both are needed for different reasons: the presence
+// branch of TestSecurity_NeitherControllerNorKubeletRetriesTheAgent says why the
+// absence is a weakening and covers both transports, while TestRender_JobHardening
+// catches it as a side effect of dig fataling on a missing key. It IS claimed for
+// RestartPolicy, whose zero value is the empty string refused below.
 func TestRetriesNothingAfterFailure(t *testing.T) {
 	ok := func() job {
 		return job{Spec: jobSpec{
@@ -472,6 +515,15 @@ func TestSecurity_NoRetryBoundsAreStated(t *testing.T) {
 		// "unbounded" and later finds out otherwise stops trusting the rest of
 		// this list.
 		{"OnFailure costs one extra start, not unbounded retries", "one more start and not an unbounded number"},
+		// Understating a bound fails the same way overstating it does. "One
+		// extra start" reads as momentary; the pod is deleted GRACEFULLY, so
+		// that start gets the full termination grace period — 30s here, since
+		// this renderer sets none — which is time to commit and push. And the
+		// Job lands in Failed either way with its logs gone, so the operator
+		// this note is written for cannot reconstruct what happened from the
+		// Job at all.
+		{"the extra start gets the full grace period, not an instant", "defaults to 30 seconds"},
+		{"a failed Job does not mean the agent did nothing", "cannot tell from the job whether the agent committed or pushed"},
 		{"no-retry is not at-most-once execution", "neither field is at-most-once execution"},
 	} {
 		if !strings.Contains(notes, want.substr) {
