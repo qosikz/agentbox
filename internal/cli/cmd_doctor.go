@@ -23,10 +23,11 @@ type doctorCheck struct {
 // A policy that parses is not a policy that runs. `andbo doctor` asked only
 // whether the YAML decoded, so it reported `config: ✓ andbo.yaml valid` for
 // files that `policy check`, `run`, `exec`, and `k8s render` all refuse — and
-// doctor is precisely what a user runs when a run has just failed. Both halves
-// of that refusal are consulted here, because they live apart: config.Check
-// covers malformed values, and checkBudgetMinutes covers a budget too large to
-// become a run deadline.
+// doctor is precisely what a user runs when a run has just failed. Every part
+// of that refusal is consulted here, because they live apart: config.Check
+// covers malformed values, checkBudgetMinutes covers a budget too large to
+// become a run deadline, and checkAgentDefault covers an agent.default that
+// names no adapter.
 //
 // Budget is read straight off the file's policy. policy.BuildEffectivePolicy
 // copies Budget through unchanged and doctor has no flags to override it with,
@@ -39,6 +40,9 @@ type doctorCheck struct {
 func policyIssues(cfg config.Policy, path string) []string {
 	issues := cfg.Check().Errors
 	if err := checkBudgetMinutes(cfg.Budget.MaxRuntimeMinutes, path); err != nil {
+		issues = append(issues, err.Error())
+	}
+	if err := checkAgentDefault(cfg.Agent.Default, cfg.Agent.Custom, path); err != nil {
 		issues = append(issues, err.Error())
 	}
 	// Doctor prints one aligned line per check. An error carrying its fix on a

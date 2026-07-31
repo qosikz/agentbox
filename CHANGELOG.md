@@ -74,6 +74,27 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **An `agent.default` naming an adapter that does not exist was called valid by
+  both gates and then killed the run.** `andbo policy check` printed
+  `✓ Policy valid`, exit `0`, and `andbo doctor` reported `config: ✓ andbo.yaml
+  valid`, for a policy `andbo run` and `andbo k8s render` refuse at exit `4` —
+  a typo (`clade`), a case slip (`Custom`), or an explicit `default: ""` all got
+  a clean bill of health from the two commands whose whole job is to catch that
+  before anything executes.
+
+  Both now resolve the adapter through `adapters.Get` — the *same* resolution
+  `run` and `k8s render` perform, not a second list of names kept beside the
+  registry — so the set the gates accept cannot drift from the set that actually
+  runs. `policy check` reports it through `check.Errors`, so it reaches `--json`
+  and the human report alike under that command's existing invalid-policy exit
+  `7`; doctor reports it on its `config` line and still exits `0`.
+
+  Nothing else changed. `run`, `exec`, and `k8s render` keep their own exit `4`
+  from `adapters.Get`, the rendered Kubernetes Job and NetworkPolicy bytes are
+  identical, and every policy with a supported `agent.default` — including all
+  four shipped `examples/*.yaml` — produces byte-identical output. `--agent NAME`
+  still overrides a broken `agent.default` for a single run: the check reads the
+  effective policy, not the raw file, so the flag wins as it always did.
 - **`andbo doctor` reported `config: ✓ andbo.yaml valid` for policies every
   other command refuses.** It only asked whether the YAML decoded, so a
   `network.mode: bogus`, a `secrets.mode: env`, an empty `runtime.image`, or a
@@ -101,11 +122,7 @@ All notable changes to Andbo are documented here.
   1440-minute `activeDeadlineSeconds` cap, `runtime.isolation: local`,
   `network.mode` allowlist/open, an agent needing environment variables — and
   doctor deliberately does not report those: it is host-local and target-agnostic,
-  and flagging them would make it cry wolf on the path most people are on. An
-  `agent.default` naming an adapter that does not exist is likewise still
-  reported valid, by `policy check` and doctor alike; `run` and `k8s render`
-  refuse it at exit `4`. Closing that one belongs in the shared validation, not
-  in doctor alone.
+  and flagging them would make it cry wolf on the path most people are on.
 
 - **A negative `budget.max_runtime_minutes` meant something different on every
   surface, and none of them was the bound it asked for.** A sign typo on the

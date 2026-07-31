@@ -285,6 +285,13 @@ andbo run "fix the failing test" --agent claude --runtime local --yes-unsafe --c
 ```
 
 Built-in adapters: `custom`, `claude`, `codex`, `gemini`, `goose`, `opencode`.
+An `agent.default` outside that set is an invalid policy: `andbo policy check`
+refuses it (exit **7**) and `andbo doctor` names it, so a typo is caught before a
+run rather than at exit `4` part-way through one — `andbo run` gets as far as
+recording a session, and cloning a remote repo, before it resolves the adapter.
+`--agent NAME` overrides `agent.default` for a single run; an unsupported name
+there is refused by that run (exit `4`), not by `policy check`, which reads the
+file.
 The `custom` adapter runs **any** CLI agent — point `agent.custom.command` at
 your binary and Andbo substitutes the task into `{{ task }}`, so you are
 never limited to the built-ins. Andbo runs the agent in a disposable
