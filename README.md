@@ -496,7 +496,13 @@ evidence the agent did nothing: check the repository, not the Job. The budget
 measures one continuously-active period rather than the Job's lifetime — it runs
 from `status.startTime`, is not evaluated at all while the Job is suspended, and
 resets on resume, so anyone who can suspend and resume the Job hands the run a
-fresh full budget each time. And enforcement is entirely the cluster's: nothing
+fresh full budget each time. The number is not settled by applying it either —
+`activeDeadlineSeconds` is **mutable on a live Job** (the update validation pins
+`selector`, `completionMode`, `podFailurePolicy`, `backoffLimitPerIndex`,
+`managedBy` and `successPolicy`, and not this one), so the same permission can
+simply raise it, and the budget in the manifest you reviewed is the budget at
+apply time rather than for the life of the run. And enforcement is entirely the
+cluster's: nothing
 in Andbo supervises a pod, so a Job reconciled by another controller through
 `managedBy` gets no deadline applied at all.
 

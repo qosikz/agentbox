@@ -78,6 +78,31 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **Kubernetes renderer: the wall-clock guard's two refusals could swap messages
+  with the suite still green.** The guard's doc comment says the two ends of the
+  range "fail differently and the messages must not be interchangeable", and
+  nothing checked that: both messages interpolate the value with `%d`, so
+  anchoring the tests on `activeDeadlineSeconds=0` matched whichever message was
+  returned. Review measured it — giving the zero branch the over-cap message
+  verbatim kept the whole repository green, leaving the guard to tell a
+  maintainer that a budget of `0` "exceeds the 86400-second cap" and to advise
+  *lowering* it. Each case now pins a clause unique to its branch as well as the
+  value. Two more claim-precision defects from the same review: the README's
+  stated **default** (`1800s`, what a run actually gets when
+  `budget.max_runtime_minutes` is `0`) was tied to `DefaultActiveDeadlineSeconds`
+  by nothing — the same hole the cap check had just closed, and arguably the more
+  load-bearing number — and the rendered-manifest test presented RANGE as an
+  independent property when it is dominated by the provenance check and
+  unreachable out of range, which the comment now states.
+- **Kubernetes renderer: the wall-clock note named the elaborate way to defeat the
+  budget and not the obvious one.** The note said a suspend/resume cycle hands the
+  run a fresh budget, which is true, and left the impression that extending a run
+  takes a trick. It does not: `activeDeadlineSeconds` is absent from the immutable
+  list in `ValidateJobSpecUpdate` — which pins `selector`, `completionMode`,
+  `podFailurePolicy`, `backoffLimitPerIndex`, `managedBy` and `successPolicy` — so
+  the same permission that could suspend and resume the Job can instead raise the
+  number directly. The budget in a reviewed manifest is the budget at apply time,
+  not for the life of the run, and the note and README now say so.
 - **Kubernetes renderer: `activeDeadlineSeconds` was a value nothing checked once
   it had been rendered, and the level below it was closed by nothing.** The
   rendered manifest is unchanged and always carried a bounded deadline; this
