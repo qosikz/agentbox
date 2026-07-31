@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"math"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -117,7 +118,8 @@ func TestSecurity_NamespaceLengthIsBounded(t *testing.T) {
 // namespace as the way this Job's default-deny is silently defeated — policies
 // are additive and cannot subtract from one another — so a namespace owned by
 // the cluster's own components is the one place the deny is least able to hold.
-// Every cluster ships more of those than the three the API reserves by name.
+// Every cluster ships more of those than the three Kubernetes creates under the
+// prefix it reserves — the prefix is the reservation, not those three names.
 func TestSecurity_ReservedNamespacePrefixIsRefused(t *testing.T) {
 	refused := []string{
 		// The three every cluster ships.
@@ -158,7 +160,11 @@ func TestSecurity_ReservedNamespacePrefixIsRefused(t *testing.T) {
 	// it. "default" belongs here too: `andbo k8s render` WARNS about it rather
 	// than refusing, and its warning is printed before validation runs — so
 	// refusing it here would print the advice and then reject the render anyway.
-	allowed := []string{"kube", "kubeflow", "kubernetes-dashboard", "andbo-kube-runs", "default", "andbo-runs"}
+	//
+	// A namespace that renders WITHOUT being one to dedicate to agent runs goes
+	// in residualSystemNamespaces instead. What the guard does not refuse is not
+	// the same as what it vetted, and this list is read as the second.
+	allowed := []string{"kube", "andbo-kube-runs", "default", "andbo-runs"}
 	for _, ns := range allowed {
 		t.Run("allowed/"+ns, func(t *testing.T) {
 			s := validSpec()
@@ -167,6 +173,96 @@ func TestSecurity_ReservedNamespacePrefixIsRefused(t *testing.T) {
 			manifest, err := s.Render()
 			if err != nil {
 				t.Fatalf("Render() = %v, want nil for namespace %q", err, ns)
+			}
+			assertHardened(t, manifest)
+			if got := dig(t, docs(t, manifest)[1], "metadata", "namespace"); got != ns {
+				t.Errorf("Job metadata.namespace = %v, want %q", got, ns)
+			}
+		})
+	}
+}
+
+// residualSystemNamespaces are names that a cluster-wide privileged add-on
+// conventionally installs into, and that this guard does NOT refuse, because
+// they sit outside the prefix Kubernetes reserves for itself. What any given
+// cluster actually put in them is not something this renderer can know — the
+// convention is the whole of the claim, and it is enough: an operator picking a
+// namespace for agent runs should not pick one a project already named.
+//
+// kubeflow and kubernetes-dashboard are the two to watch. Each is "kube"
+// followed by something that is not the hyphen, so each misses this prefix by a
+// single character and renders looking like a name the guard weighed and
+// cleared. Neither is.
+//
+// The list is illustrative, not exhaustive — no list could be, which is the
+// point of a bound. It holds the names most likely to be mistaken for cleared
+// ones.
+var residualSystemNamespaces = []string{
+	"kubeflow",
+	"kubernetes-dashboard",
+	"calico-system",
+	"tigera-operator",
+	"istio-system",
+	"metallb-system",
+	"openshift-monitoring",
+}
+
+// TestSecurity_ReservedNamespaceBoundIsDocumentedAndTrue covers the guard's
+// stated BOUND rather than what it refuses.
+//
+// The guard refuses the prefix Kubernetes reserves and nothing else, so every
+// system namespace another project or distribution picked for itself still
+// renders. That residual is a claim this package makes about itself — it is
+// written on reservedNamespacePrefix — and both halves of it need checking:
+// every namespace this package files as residual has to appear in that bound,
+// and each one has to actually still render.
+//
+// The first half is what keeps the two lists from disagreeing. It does not make
+// either exhaustive, and neither claims to be: a name absent from BOTH is
+// invisible to this test, so adding one here is how it gets checked.
+func TestSecurity_ReservedNamespaceBoundIsDocumentedAndTrue(t *testing.T) {
+	// The bound is prose, so read it where it is written rather than restating
+	// it here — a copy in the test would drift from the one operators read.
+	//
+	// Match the ENUMERATION, not the whole comment: the names have to be in the
+	// list the bound gives, and a name that only turns up in a later sentence is
+	// not in it. Both anchors and the enclosing comment are load-bearing, so
+	// rewording either fails this test rather than silently skipping it.
+	const (
+		listOpen  = "choose for themselves — "
+		listClose = " — which this renderer"
+	)
+	src, err := os.ReadFile("validate.go")
+	if err != nil {
+		t.Fatalf("read validate.go: %v", err)
+	}
+	// Flatten to one line first so the check does not depend on where the prose
+	// happens to wrap.
+	flat := strings.Join(strings.Fields(strings.ReplaceAll(string(src), "//", " ")), " ")
+	start := strings.Index(flat, listOpen)
+	end := strings.Index(flat, listClose)
+	if start < 0 || end < start {
+		t.Fatalf("cannot find the enumerated residual in the doc comment on reservedNamespacePrefix in validate.go, between %q and %q; that enumeration is the guard's stated bound and is what this test checks", listOpen, listClose)
+	}
+	enumerated := flat[start+len(listOpen) : end]
+
+	for _, ns := range residualSystemNamespaces {
+		if !strings.Contains(enumerated, ns) {
+			t.Errorf("the guard's stated bound does not name %q, so an operator reading it would take that namespace for one the guard considered and cleared. It is not: it is a name a privileged add-on conventionally installs into, and it renders.\nbound names: %s", ns, enumerated)
+		}
+	}
+
+	// The other half: the bound says these render, and nothing pinned that. A
+	// broader guard would refuse them, which is a real change to who can run
+	// where, and it must not happen without the bound being rewritten.
+	for _, ns := range residualSystemNamespaces {
+		t.Run("renders/"+ns, func(t *testing.T) {
+			s := validSpec()
+			s.Namespace = ns
+
+			manifest, err := s.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil: the guard covers only the %q prefix, and the stated bound says this namespace renders", err, reservedNamespacePrefix)
 			}
 			assertHardened(t, manifest)
 			if got := dig(t, docs(t, manifest)[1], "metadata", "namespace"); got != ns {

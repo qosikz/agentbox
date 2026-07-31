@@ -37,10 +37,16 @@ var (
 //
 // The prefix bounds the guard to what Kubernetes itself reserves. It does NOT
 // cover the system namespaces other projects and distributions choose for
-// themselves — calico-system, tigera-operator, istio-system, openshift-*,
-// metallb-system — which this renderer has no way to recognise. Note 3 of
-// EnforcementNotes is the standing answer for those: run agents in a dedicated
-// namespace, and audit the policy objects before applying.
+// themselves — kubeflow, kubernetes-dashboard, calico-system, tigera-operator,
+// istio-system, metallb-system, openshift-monitoring and the rest of
+// openshift-* — which this renderer has no way to recognise. The first two are
+// the ones to watch: each is "kube" followed by
+// something that is not the hyphen, so each misses this prefix by a single
+// character and renders looking like a name the guard weighed and cleared.
+// Rendering is not a verdict on any of them, and no list of names could be
+// exhaustive — that is what makes this a bound and not coverage. Note 3 of
+// EnforcementNotes is the standing answer: run agents in a dedicated namespace,
+// and audit the policy objects before applying.
 const reservedNamespacePrefix = "kube-"
 
 // reservedMountPaths are directories the container image or the kernel owns.
