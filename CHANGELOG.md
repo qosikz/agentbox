@@ -80,8 +80,9 @@ All notable changes to Andbo are documented here.
   `ingress-nginx`, `velero`, `cattle-system`, `istio-system`,
   `openshift-monitoring` and the rest of the residual the previous fix
   documented all produced an applyable manifest that put the agent in a
-  namespace owned by a component holding cluster-wide RBAC — for four of those,
-  cluster-wide access to `Secrets`. The renderer's own enforcement notes name
+  namespace owned by a project whose default install binds cluster-wide RBAC to
+  a service account living there — for several of them, cluster-wide access to
+  `Secrets`. The renderer's own enforcement notes name
   another NetworkPolicy in that same namespace as the way this Job's
   default-deny is silently defeated: policies are additive and cannot subtract
   from one another, so a namespace belonging to such a component is the one
@@ -105,10 +106,17 @@ All notable changes to Andbo are documented here.
     `velero-agent-runs`, `kyverno-agent`, `kube`, `andbo-kube-runs`,
     `andbo-runs` and `default` all still render (tests pin each).
 
-  The error names the owning project and says why the name is refused —
-  cluster-wide privilege plus the additive-policy reason — rather than only
-  asserting the namespace is taken. Exit code is unchanged (`7`, invalid
-  manifest).
+  The error names the owning project and says why the name is refused — the
+  additive-policy reason, plus the reason that is true of *that* namespace —
+  rather than only asserting the namespace is taken. For most of the list that
+  is cluster-wide privilege. For `kubernetes-dashboard` and `openshift` it is
+  ownership alone: the Dashboard ships a namespaced `Role` and a metrics-only
+  `ClusterRole` (operators binding `cluster-admin` to it is a thing operators
+  do, not a thing it ships), and `openshift` is a content namespace of shared
+  imagestreams and templates with nothing of OpenShift's running in it. Both are
+  still refused, on the ground that holds. A test pins the split in both
+  directions, so the stronger reason cannot be asserted where it is not true.
+  Exit code is unchanged (`7`, invalid manifest).
 
   **What this still does not cover:** any privileged project outside that list,
   and the rest of a family only one member of which is named — `argocd`,
@@ -157,9 +165,12 @@ All notable changes to Andbo are documented here.
   dedicated namespace, and audit the namespaced and cluster-scoped policy objects
   before applying.
 
-  **Superseded within this same unreleased cycle** by the entry above: every
-  name listed here as still rendering is now refused, `openshift-*` by prefix
-  and the rest by exact name. What still renders is stated there.
+  **Superseded within this same unreleased cycle** by the entry above, but only
+  as to the "what this does not cover" list: those names are now refused,
+  `openshift-*` by prefix and the rest by exact name. Everything this entry
+  records as *rendering* — `kube`, `andbo-kube-runs`, `default` (still a warning,
+  not a refusal) and `andbo-runs` — still renders. What is left uncovered is
+  restated there.
 - **An `agent.default` naming an adapter that does not exist was called valid by
   both gates and then killed the run.** `andbo policy check` printed
   `✓ Policy valid`, exit `0`, and `andbo doctor` reported `config: ✓ andbo.yaml

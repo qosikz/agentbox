@@ -20,14 +20,36 @@ var (
 	envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
-// namespaceOwner names a namespace — or, in reservedNamespacePrefixes, a whole
-// family of them — together with the project that owns it. The owner is named
-// in the error so an operator can tell which of their cluster's components they
-// were about to sit an agent next to.
+// namespaceOwner names a namespace family a platform reserves, together with
+// the platform that reserves it. The owner is named in the error so an operator
+// can tell whose namespace they were about to sit an agent in.
 type namespaceOwner struct {
 	ns    string
 	owner string
 }
+
+// ownedNamespace names a namespace a project installs, the project, and WHY a
+// Job must not run there.
+//
+// The reason is carried per namespace because it is not the same reason twice.
+// Most of these hold components with cluster-wide RBAC, and saying so is the
+// whole security argument for refusing them — but asserting it of a namespace
+// whose default install does not have it would be an overclaim, and an operator
+// cannot weigh a reason that is not true of their cluster.
+type ownedNamespace struct {
+	ns    string
+	owner string
+	why   string
+}
+
+const (
+	// whyPrivileged is for namespaces whose default install binds cluster-wide
+	// RBAC to a service account that lives there.
+	whyPrivileged = "its components hold cluster-wide privilege, so a Job there shares a namespace with them and their service accounts"
+	// whyProjectOwned is for namespaces a project installs and manages the
+	// contents of without necessarily running anything privileged in them.
+	whyProjectOwned = "that project installs and manages what is in it, so a Job there runs in another project's namespace rather than one you control"
+)
 
 // reservedNamespacePrefixes are prefixes a platform RESERVES for its own system
 // namespaces. Scheduling an agent under one would place it next to
@@ -78,25 +100,33 @@ var reservedNamespacePrefixes = []namespaceOwner{
 // what makes this a bound and not coverage. Note 3 of EnforcementNotes is the
 // standing answer: run agents in a dedicated namespace, and audit the policy
 // objects before applying.
-var reservedNamespaceNames = []namespaceOwner{
+var reservedNamespaceNames = []ownedNamespace{
 	// Each is "kube" followed by something that is not the hyphen, so each
-	// misses the reserved prefix by a single character.
-	{"kubeflow", "Kubeflow"},
-	{"kubernetes-dashboard", "the Kubernetes Dashboard"},
+	// misses the reserved prefix by a single character. The Dashboard is the
+	// one refused on ownership rather than privilege: its default install is a
+	// namespaced Role plus a metrics-only ClusterRole, and operators binding
+	// cluster-admin to it is a thing operators do, not a thing it ships.
+	{"kubeflow", "Kubeflow", whyPrivileged},
+	{"kubernetes-dashboard", "the Kubernetes Dashboard", whyProjectOwned},
 	// CNI and platform components, which run privileged by construction.
-	{"calico-system", "Calico"},
-	{"tigera-operator", "the Tigera operator"},
-	{"istio-system", "Istio"},
-	{"metallb-system", "MetalLB"},
-	{"openshift", "OpenShift"},
-	{"cattle-system", "Rancher"},
-	// Admission, certificate, ingress, and backup components: each holds
-	// cluster-wide RBAC, and the last three reach cluster-wide Secrets.
-	{"gatekeeper-system", "OPA Gatekeeper"},
-	{"kyverno", "Kyverno"},
-	{"cert-manager", "cert-manager"},
-	{"ingress-nginx", "the NGINX ingress controller"},
-	{"velero", "Velero"},
+	{"calico-system", "Calico", whyPrivileged},
+	{"tigera-operator", "the Tigera operator", whyPrivileged},
+	{"istio-system", "Istio", whyPrivileged},
+	{"metallb-system", "MetalLB", whyPrivileged},
+	// "openshift" holds shared imagestreams and templates. Nothing of
+	// OpenShift's runs in it — the operator that manages its contents lives in
+	// openshift-cluster-samples-operator, under the reserved prefix above.
+	{"openshift", "OpenShift", whyProjectOwned},
+	{"cattle-system", "Rancher", whyPrivileged},
+	// Admission, certificate, ingress, and backup components: each binds
+	// cluster-wide RBAC, and several of them reach cluster-wide Secrets.
+	{"gatekeeper-system", "OPA Gatekeeper", whyPrivileged},
+	{"kyverno", "Kyverno", whyPrivileged},
+	{"cert-manager", "cert-manager", whyPrivileged},
+	// The community controller (kubernetes/ingress-nginx), not F5's NGINX
+	// Ingress Controller, which installs into nginx-ingress instead.
+	{"ingress-nginx", "the Ingress-NGINX controller", whyPrivileged},
+	{"velero", "Velero", whyPrivileged},
 }
 
 // reservedNamespaceProblem reports why ns must not host an agent Job, or "" if
@@ -110,7 +140,7 @@ func reservedNamespaceProblem(ns string) string {
 	}
 	for _, r := range reservedNamespaceNames {
 		if ns == r.ns {
-			return fmt.Sprintf("namespace %q belongs to %s: it is a namespace that project installs, and its components hold cluster-wide privilege, so a Job there shares a namespace with them and their service accounts — and this renderer cannot know what else your cluster put in it. NetworkPolicies are also additive, so whatever policy that namespace already carries, this Job's default-deny cannot subtract from it. Use a dedicated namespace for agent runs (e.g. \"andbo-runs\")", ns, r.owner)
+			return fmt.Sprintf("namespace %q belongs to %s: %s, and this renderer cannot know what else your cluster put in it. NetworkPolicies are also additive, so whatever policy that namespace already carries, this Job's default-deny cannot subtract from it. Use a dedicated namespace for agent runs (e.g. \"andbo-runs\")", ns, r.owner, r.why)
 		}
 	}
 	return ""

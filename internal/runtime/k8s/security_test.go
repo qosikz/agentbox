@@ -198,23 +198,36 @@ func TestSecurity_ReservedNamespacePrefixIsRefused(t *testing.T) {
 // What any given cluster actually put in these is not something this renderer
 // can know. The convention is the whole of the claim, and it is enough to
 // refuse on: the cost of a wrong refusal is an operator renaming a namespace,
-// and the cost of a wrong acceptance is an agent sharing a namespace with a
-// component that holds cluster-wide privilege, under a default-deny that
-// NetworkPolicy additivity will not let this Job enforce.
-var systemAddOnNamespaces = []string{
-	"kubeflow",
-	"kubernetes-dashboard",
-	"calico-system",
-	"tigera-operator",
-	"istio-system",
-	"metallb-system",
-	"openshift",
-	"cattle-system",
-	"gatekeeper-system",
-	"kyverno",
-	"cert-manager",
-	"ingress-nginx",
-	"velero",
+// and the cost of a wrong acceptance is an agent inside another project's
+// namespace, under a default-deny that NetworkPolicy additivity will not let
+// this Job enforce.
+//
+// claimsPrivilege records which reason the error is allowed to give. Most of
+// these namespaces hold components with cluster-wide RBAC, and saying so is the
+// whole security argument for refusing them — but it is not true of all of
+// them, and this project's rules forbid overclaiming. The Kubernetes Dashboard
+// ships a namespaced Role and one metrics-only ClusterRole (operators binding
+// cluster-admin to it is a thing operators do, not a thing it ships), and
+// "openshift" is a content namespace of shared imagestreams and templates with
+// nothing running in it. Both are still refused — they belong to a project that
+// manages what is in them — but on the reason that is true of them.
+var systemAddOnNamespaces = []struct {
+	ns              string
+	claimsPrivilege bool
+}{
+	{"kubeflow", true},
+	{"kubernetes-dashboard", false},
+	{"calico-system", true},
+	{"tigera-operator", true},
+	{"istio-system", true},
+	{"metallb-system", true},
+	{"openshift", false},
+	{"cattle-system", true},
+	{"gatekeeper-system", true},
+	{"kyverno", true},
+	{"cert-manager", true},
+	{"ingress-nginx", true},
+	{"velero", true},
 }
 
 // TestSecurity_SystemAddOnNamespacesAreRefused covers the names outside every
@@ -226,24 +239,40 @@ var systemAddOnNamespaces = []string{
 // another. A namespace belonging to a component that holds cluster-wide
 // privilege is exactly where that bites, and no prefix test reaches these.
 func TestSecurity_SystemAddOnNamespacesAreRefused(t *testing.T) {
-	for _, ns := range systemAddOnNamespaces {
-		t.Run("refused/"+ns, func(t *testing.T) {
+	for _, tc := range systemAddOnNamespaces {
+		t.Run("refused/"+tc.ns, func(t *testing.T) {
 			s := validSpec()
-			s.Namespace = ns
+			s.Namespace = tc.ns
 
 			// Render, not Validate: Render is the only surface that produces
 			// bytes an operator can apply, so it is the one that has to refuse.
 			_, err := s.Render()
 			if err == nil {
-				t.Fatalf("Render() accepted namespace %q, want a rejection", ns)
+				t.Fatalf("Render() accepted namespace %q, want a rejection", tc.ns)
 			}
-			// What failed, why, and how to fix it. "privileg" is the why these
-			// names are refused at all — without it the error asserts only that
-			// the name is taken, which is hygiene, not a security reason.
-			for _, want := range []string{ns, "privileg", "additive", "dedicated namespace"} {
+			// What failed, why, and how to fix it.
+			for _, want := range []string{tc.ns, "belongs to", "additive", "dedicated namespace"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error does not contain %q, so it does not explain what failed, why, and how to fix it:\n%v", want, err)
 				}
+			}
+
+			// The reason has to be the one that is TRUE of this namespace.
+			// Cluster-wide privilege is why most of these are refused, and an
+			// error that drops it asserts only that the name is taken, which is
+			// hygiene rather than a security reason. Asserting it where the
+			// project's default install does not have it is the overclaim this
+			// codebase forbids, and it is the same defect in the other
+			// direction: an operator cannot weigh a reason that is not true.
+			hasPrivilegeClaim := strings.Contains(err.Error(), "cluster-wide privilege")
+			sharesNamespaceClaim := strings.Contains(err.Error(), "service accounts")
+			switch {
+			case tc.claimsPrivilege && !hasPrivilegeClaim:
+				t.Errorf("error for %q does not say its components hold cluster-wide privilege, which is why this namespace is refused at all:\n%v", tc.ns, err)
+			case !tc.claimsPrivilege && hasPrivilegeClaim:
+				t.Errorf("error for %q claims cluster-wide privilege, which that project's default install does not have; refuse it on the reason that is true of it:\n%v", tc.ns, err)
+			case !tc.claimsPrivilege && sharesNamespaceClaim:
+				t.Errorf("error for %q claims a Job would share the namespace with that project's components and their service accounts; nothing of that project runs there:\n%v", tc.ns, err)
 			}
 		})
 	}
