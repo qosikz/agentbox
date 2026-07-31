@@ -56,6 +56,25 @@ func denyAllSpecs(t *testing.T) map[string]JobSpec {
 	return out
 }
 
+// wantDenyAllShapes is the floor both contracts below check BEFORE ranging.
+//
+// A range over an empty map is a pass that asserted nothing, and this helper
+// draws most of its contents from containerLists in another file, so narrowing
+// it is reachable without touching this one — review emptied it and both
+// contracts went green. The first fix put the check inside denyAllSpecs, which
+// review then walked straight past by replacing the function body: a guard
+// inside the thing being narrowed is not a guard. It belongs at the loop.
+const wantDenyAllShapes = 6
+
+func denyAllShapes(t *testing.T) map[string]JobSpec {
+	t.Helper()
+	specs := denyAllSpecs(t)
+	if len(specs) < wantDenyAllShapes {
+		t.Fatalf("denyAllSpecs returned %d shapes, want at least %d: a contract that ranges over a narrowed fixture set asserts less than it claims, and over an empty one asserts nothing at all while still reporting a pass", len(specs), wantDenyAllShapes)
+	}
+	return specs
+}
+
 // TestSecurity_TheNetworkPolicyDeniesEveryDirection asserts the denial as an
 // observable property of the rendered manifest, for every shape Render emits.
 //
@@ -79,7 +98,7 @@ func denyAllSpecs(t *testing.T) map[string]JobSpec {
 //     a harmless one: upstream says an empty `to` "matches all destinations" and
 //     an empty `ports` "matches all ports", so `egress: [{}]` allows everything.
 func TestSecurity_TheNetworkPolicyDeniesEveryDirection(t *testing.T) {
-	for name, spec := range denyAllSpecs(t) {
+	for name, spec := range denyAllShapes(t) {
 		t.Run(name, func(t *testing.T) {
 			manifest, err := spec.Render()
 			if err != nil {
@@ -149,7 +168,7 @@ func TestSecurity_NoOtherFieldCanPunchAHoleInTheDenyAll(t *testing.T) {
 
 	const contract = "the deny-all contract; a NetworkPolicy field outside this set can stop the policy denying what its name says it denies, and a rendered rule is the maximal hole rather than a partial one (an empty egress rule matches all destinations on all ports)"
 
-	for name, spec := range denyAllSpecs(t) {
+	for name, spec := range denyAllShapes(t) {
 		t.Run(name, func(t *testing.T) {
 			manifest, err := spec.Render()
 			if err != nil {
@@ -201,54 +220,80 @@ func TestDeniesEveryDirection(t *testing.T) {
 			np:   policy("Ingress", "Egress"),
 		},
 		{
-			name:   "no policy types at all",
+			// policy is variadic, so this passes a NIL slice, not an empty one.
+			name:   "nil policy types",
 			np:     policy(),
-			substr: "defaults",
+			substr: "an empty list is not neutral",
 		},
 		{
-			// A nil slice and an empty one are the same length and the same
-			// failure; the guard must not distinguish them.
-			name:   "nil policy types",
-			np:     networkPolicy{Metadata: objectMeta{Name: "fix-tests-deny-all"}},
-			substr: "defaults",
+			// An EMPTY NON-NIL slice, which is the case that distinguishes
+			// `len(x) == 0` from `x == nil` — and the first draft of this table
+			// did not have it. Both of its "empty" rows went through the
+			// variadic call and so supplied nil twice, which review caught by
+			// weakening the guard to `np.Spec.PolicyTypes == nil`: that passed
+			// the whole package. It is not a hole (an empty slice still fails
+			// the egress count) but it loses the diagnosis this row exists for,
+			// and Render is one `append` away from producing exactly this.
+			name: "empty non-nil policy types",
+			np: networkPolicy{
+				Metadata: objectMeta{Name: "fix-tests-deny-all"},
+				Spec:     networkPolicySpec{PolicyTypes: []string{}},
+			},
+			substr: "an empty list is not neutral",
+		},
+		{
+			// TWO entries, one direction. This is the shape upstream ACCEPTS —
+			// it refuses only a list longer than two and deduplicates nothing —
+			// so it applies cleanly as an ingress-only policy. It is also the
+			// row the table lacked while the guard claimed every repeat "would
+			// be rejected outright", which was false for exactly this input.
+			name:   "two entries, both Ingress",
+			np:     policy("Ingress", "Ingress"),
+			substr: "want exactly once",
+		},
+		{
+			// The same length, the other direction, and the one that keeps the
+			// egress count honest: relaxed to `egress < 1`, this falls through
+			// to the ingress branch and gets that branch's message instead.
+			name:   "two entries, both Egress",
+			np:     policy("Egress", "Egress"),
+			substr: "want exactly once",
 		},
 		{
 			name:   "ingress only leaves egress open",
 			np:     policy("Ingress"),
-			substr: "Egress",
+			substr: "want exactly once",
 		},
 		{
 			name:   "egress only leaves ingress open",
 			np:     policy("Egress"),
-			substr: "Ingress",
+			substr: "does not name",
 		},
 		{
-			// Both directions are named, so a presence check passes — while the
-			// API server refuses more than two policyTypes outright and the
-			// manifest describes a policy that cannot be applied.
-			name:   "a duplicated egress",
+			// THREE entries, which upstream refuses outright — a different
+			// failure from the two-entry repeat above and the only row that
+			// reaches the length branch. Before this row existed that branch was
+			// pinned by nothing: deleting it, or relaxing it to `> 3`, left the
+			// suite green because the three-entry rows fell back to the count
+			// messages, whose %v dump of the list re-satisfied the direction
+			// substrings they were checking. Which is why every substring in
+			// this table is now a phrase unique to ONE branch's message rather
+			// than a value any message might echo.
+			name:   "three entries, longer than a NetworkPolicy has directions",
 			np:     policy("Ingress", "Egress", "Egress"),
-			substr: "Egress",
+			substr: "longer than two",
 		},
 		{
-			// The same case on the other axis, and it is not symmetry for its
-			// own sake: with only the egress half here, relaxing the ingress
-			// count from "exactly once" to "at least once" passed the whole
-			// suite. Each direction needs its own duplicate.
-			name:   "a duplicated ingress",
-			np:     policy("Ingress", "Ingress", "Egress"),
-			substr: "Ingress",
-		},
-		{
-			// BOTH directions are named here, and that is the point. With an
-			// unknown value alongside a MISSING direction, the count check
-			// fires first and its message prints the whole policyTypes list —
-			// so a substring assertion on the unknown value is satisfied by the
-			// wrong error, and deleting the default case entirely passed. Only
-			// a policy that is otherwise complete reaches the switch's default.
+			// Two entries, so this clears the length branch and reaches the
+			// switch. Asserting on a phrase only the default arm carries — not
+			// on "Sideways" — is what makes it discriminating: every count
+			// message %v-dumps the whole list, so a check for the offending
+			// VALUE is satisfied by whichever branch happens to fire. That cost
+			// one round already, where a three-entry version of this row passed
+			// with the default case deleted.
 			name:   "an unknown direction",
-			np:     policy("Ingress", "Egress", "Sideways"),
-			substr: "Sideways",
+			np:     policy("Ingress", "Sideways"),
+			substr: "the only directions a NetworkPolicy has",
 		},
 	}
 
@@ -283,7 +328,12 @@ func TestDeniesEveryDirection(t *testing.T) {
 // policyTypes, or repoint podSelector, and the object survives with its name,
 // namespace and labels intact — so it still appears bound to the run.
 func TestSecurity_DenyAllBoundsAreStated(t *testing.T) {
-	const anchor = "a networkpolicy has no immutable fields"
+	// The anchor is the note's SUBJECT, not one of the claims checked below.
+	// Review found the first draft using the immutability claim for both, which
+	// made that entry unfalsifiable: the note is only selected when it contains
+	// the anchor, so asserting the anchor again cannot fail. The table read as
+	// eight checks and had seven.
+	const anchor = "the networkpolicy must exist for the whole lifetime of the pod"
 	var notes string
 	for _, n := range validSpec().EnforcementNotes() {
 		if lowered := strings.ToLower(n); strings.Contains(lowered, anchor) {
@@ -307,7 +357,12 @@ func TestSecurity_DenyAllBoundsAreStated(t *testing.T) {
 	for _, want := range []struct{ topic, substr string }{
 		// The mechanism, named precisely enough to be checkable against
 		// upstream rather than merely plausible.
-		{"nothing in the spec is pinned on update", "a networkpolicy has no immutable fields"},
+		{"nothing in the spec is pinned on update", "a networkpolicy has no immutable spec fields"},
+		// "spec" is the word an earlier draft dropped, and dropping it inverted
+		// the paragraph's own argument: the object keeps the identity it was
+		// reviewed under precisely BECAUSE metadata.name and metadata.namespace
+		// are immutable. Pin the correction, not just the claim it corrects.
+		{"metadata is pinned even though the spec is not", "validateobjectmetaupdate does run validateimmutablefield"},
 		// The three edits that follow from it, since each defeats the policy in
 		// a different way and a reader who knows only one will look for the
 		// wrong thing.
@@ -318,11 +373,23 @@ func TestSecurity_DenyAllBoundsAreStated(t *testing.T) {
 		// the object survives all three edits, so it still reads as bound.
 		{"none of the edits removes the object", "none of the three deletes anything"},
 		{"so it still reads as bound to the run", "still named for the run"},
-		// Where it is actually refused. Nothing rendered can refuse it.
-		{"RBAC is where it is refused", "rbac"},
-		// The claim's altitude, stated the way the sibling contracts state
-		// theirs.
-		{"read it as an apply-time property", "property of the manifest at apply time"},
+		// How many of the three Render actually refuses, which the first draft
+		// got wrong in the direction that matters. It said "Render refuses all
+		// three", attributing to a runtime guard a refusal only the test suite
+		// provides: deniesEveryDirection reads policyTypes and nothing else, so
+		// a rendered egress rule passes it. Two guards, three edits.
+		{"render refuses two of the three, not all", "refuses two of the three"},
+		{"the third is refused by construction, not by a guard", "not by a guard"},
+		// Where it is actually refused. Nothing rendered can refuse it. A bare
+		// "rbac" was the third vacuous substring here: it carries no
+		// proposition, so negating the mitigation outright — "RBAC is not what
+		// defends the live object" — left the test green.
+		{"RBAC is where it is refused", "is what defends the live object"},
+		// And the altitude, which the sibling contracts all state. Matching only
+		// the noun phrase was the fourth: it survives its own negation, because
+		// "more than a property of the manifest at apply time" contains it
+		// verbatim. Anchor the negative half, which a reversal has to drop.
+		{"read it as an apply-time property", "property of the manifest at apply time, not of the run"},
 	} {
 		if !strings.Contains(notes, want.substr) {
 			t.Errorf("enforcement notes do not state the bound %q (looking for %q):\n%s", want.topic, want.substr, notes)

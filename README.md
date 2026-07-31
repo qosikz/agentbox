@@ -567,23 +567,32 @@ controller through `managedBy` gets no deadline applied at all.
 
 **And the `NetworkPolicy` is the least held of all of them.** Andbo renders it
 with `policyTypes: [Ingress, Egress]` and no rules, which is what makes it deny
-both directions, and a render-time guard refuses any other shape — an empty
-`policyTypes` most of all, because that is not neutral: the API server *defaults*
-an empty list to `[Ingress]` alone for a policy carrying no egress rules, so the
-one field that closes egress gets completed by the cluster into the value that
-opens it. But **a `NetworkPolicy` has no immutable fields whatever** —
-`ValidateNetworkPolicyUpdate` runs the same spec validation a create does and
-pins nothing — so every part of it can be rewritten on the live object. Adding an
-egress rule is the widest edit available (an empty `to` matches every
+both directions. A render-time guard refuses any other **`policyTypes`** — an
+empty one most of all, because that is not neutral: the API server *defaults* an
+empty list to `[Ingress]` alone for a policy carrying no egress rules, so the one
+field that closes egress gets completed by the cluster into the value that opens
+it. The *no rules* half is not held by that guard but by construction — `JobSpec`
+has no field that renders an `ingress` or `egress` rule, and the manifest type's
+field set is closed by test rather than at render time.
+
+None of which survives contact with a live cluster, because **a `NetworkPolicy`
+has no immutable *spec* fields**: `ValidateNetworkPolicyUpdate` re-runs the same
+spec validation a create does and pins nothing in it, so every part of the spec
+can be rewritten on the live object. (Its *metadata* is pinned —
+`ValidateObjectMetaUpdate` calls `ValidateImmutableField` on `name`, `namespace`,
+`uid`, `creationTimestamp`, `deletionTimestamp` and
+`deletionGracePeriodSeconds` — and that is precisely what makes the edit quiet.)
+Adding an egress rule is the widest edit available (an empty `to` matches every
 destination, an empty `ports` every port), dropping `Egress` from `policyTypes`
 is the quietest, and repointing `podSelector` at labels no pod carries is a third
 route to the same place. None of them deletes anything: the policy is still
 there, still named for the run, still in the pod's namespace with the run's
-labels, so `kubectl get networkpolicy` shows exactly what you expect while the
-agent has egress. That makes it strictly quieter than the deletion already
-described above. RBAC on `networkpolicies` — the **update** verb as much as
-`delete` — is what defends the live object, and a persistent namespace-wide
-default-deny that does not depend on this one is the durable backstop.
+labels — those six immutable metadata fields guarantee it — so
+`kubectl get networkpolicy` shows exactly what you expect while the agent has
+egress. That makes it strictly quieter than the deletion already described above.
+RBAC on `networkpolicies` — the **update** verb as much as `delete` — is what
+defends the live object, and a persistent namespace-wide default-deny that does
+not depend on this one is the durable backstop.
 
 Where it fails closed instead of downgrading — all of these exit **2**:
 `network.mode` `allowlist` and `open` are **rejected** (NetworkPolicy selects by

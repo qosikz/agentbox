@@ -43,9 +43,16 @@ All notable changes to Andbo are documented here.
 
   **The apply-time half does not hold at all, and that is now stated.** The
   existing lifetime note covered *deletion*; deletion is the loud route and not
-  the only one. `ValidateNetworkPolicyUpdate` calls `ValidateImmutableField` on
-  nothing whatever — **a NetworkPolicy has no immutable fields** — where the Job
-  at least freezes its pod template. So anyone who can update it rewrites the live
+  the only one. `ValidateNetworkPolicyUpdate` re-runs the same spec validation a
+  create does and pins nothing in it — **a NetworkPolicy has no immutable *spec*
+  fields** — where the Job at least freezes its pod template. Its *metadata* is a
+  different matter, and review caught the first draft of this entry saying a
+  NetworkPolicy had no immutable fields at all: `ValidateObjectMetaUpdate` calls
+  `ValidateImmutableField` on `name`, `namespace`, `uid`, `creationTimestamp`,
+  `deletionTimestamp` and `deletionGracePeriodSeconds`. Dropping "spec" was not
+  merely imprecise — it contradicted the argument it was supporting, since the
+  edited policy keeps the identity it was reviewed under *because* those six are
+  pinned. So anyone who can update it rewrites the live
   object instead: add an egress rule (an empty one is the widest hole available,
   since upstream reads an empty `to` as every destination and an empty `ports` as
   every port), drop `Egress` from `policyTypes`, or repoint `podSelector` at
