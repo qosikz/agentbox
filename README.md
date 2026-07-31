@@ -485,6 +485,39 @@ different bytes each time. The pull itself is the kubelet's, from whatever
 registry and credentials the node has: Andbo neither signs, verifies, nor admits
 the image, and the `NetworkPolicy` does not restrict the pull.
 
+None of those values is settled by applying the manifest, and the answer differs
+field by field — which matters, because "I reviewed the manifest" is how they get
+trusted in the first place. **Held:** `restartPolicy: Never` and
+`imagePullPolicy: Always` ride in the pod template, and every branch of the
+update path ends in an immutability check on it, so neither can be changed on a
+live Job at all. `completions: 1` is held by a longer route — the update path
+lets `completions` move only for an `Indexed` Job, Andbo emits no
+`completionMode` so the API server stores `NonIndexed`, and `completionMode` is
+itself immutable, so this Job cannot become `Indexed` later.
+
+**Not held: `backoffLimit: 0` and `parallelism: 1`.** Raising `backoffLimit` is
+the direct route: the controller compares the new value on its next sync, so the
+replacement pod the manifest refuses is one edit away for as long as the agent is
+running. Its only limit is the run's own end — a Job already carrying a
+`Complete` or `Failed` condition is skipped before the controller reads the retry
+budget, so raising it after a `BackoffLimitExceeded` restarts nothing.
+`parallelism` is not a no-op either, and the reason is a mechanism worth knowing
+because it defeats `backoffLimit: 0` without touching it: **the Job controller
+strips a pod's tracking finalizer before issuing its own deletes, and every
+failure-counting path skips a pod without that finalizer.** So setting
+`parallelism: 0` deletes the running agent and counts nothing; the Job stays
+alive with no pod; setting it back to `1` starts the agent over, on a workspace
+the first attempt half-wrote and after whatever it already pushed. Do both
+quickly and the replacement is created while the original is still inside its
+30-second grace period — two agents, one repository, one set of credentials —
+because terminating pods are subtracted from what the controller creates only
+under a `podReplacementPolicy` Andbo does not emit. Raising `parallelism` alone
+adds no pod (the controller caps wanted pods at `completions` minus successes),
+so the one-pod bound rests on `completions`; the rendered `parallelism: 1` is
+intent the cluster is not enforcing. All of this concerns *this Job object*:
+deleting and re-applying is not an update, and neither is a second Job from the
+same manifest.
+
 Finally, `activeDeadlineSeconds` is when the cluster **begins** ending the run,
 not when the agent stops. The Job controller deletes the pod through a call that
 carries no delete options at all, so it cannot ask for a shorter shutdown: the
@@ -498,22 +531,20 @@ mid-flight**, leaving a half-written push or a repository holding an
 deleted, so that state is **not** evidence the agent did nothing: check the
 repository, not the Job.
 
-Two things that look like ways to extend the budget, and are not.
-**Suspending a running Job ends it.** The suspend deletes the pod; the Job
-controller counts a deleted pod as a failure, and against `backoffLimit: 0` that
-one failure finishes the Job as `BackoffLimitExceeded` — permanently, since a
-finished Job is not resumed. So a suspend does not pause an Andbo run, it kills
-it, and leaves it in the state described above as an agent failure. (A Job
-created *suspended* that never ran a pod does get a full budget when resumed,
-but that is a delayed start, not an extension.) What **does** extend it is
-simpler: `activeDeadlineSeconds` is **mutable on a live Job** — the update
-validation pins `selector`, `completionMode`, `podFailurePolicy`,
-`backoffLimitPerIndex`, `managedBy` and `successPolicy`, and not this one — so
-anyone who could suspend the Job can instead just raise the number. The budget in
-the manifest you reviewed is the budget at apply time, not for the life of the
-run. And enforcement is entirely the cluster's: nothing in Andbo supervises a
-pod, so a Job reconciled by another controller through `managedBy` gets no
-deadline applied at all.
+Two ways to extend the budget, both available to anyone who can update the Job.
+**Suspending and resuming resets the clock.** The suspend deletes the pod, but by
+the finalizer mechanism above that deletion counts as nothing: the Job takes a
+`JobSuspended` condition, stays unfinished, and resuming resets `status.startTime`
+to that moment and creates a fresh pod. So a suspend/resume cycle hands the run a
+full new budget *and* starts the agent over — an unbounded extension, repeatable.
+The second way is simply more direct: `activeDeadlineSeconds` is **mutable on a
+live Job** — the update validation's immutability checks name `selector`,
+`completionMode`, `podFailurePolicy`, `backoffLimitPerIndex`, `managedBy` and
+`successPolicy`, and not this one — so the number can be raised without even
+restarting the agent. The budget in the manifest you reviewed is the budget at
+apply time, not for the life of the run. And enforcement is entirely the
+cluster's: nothing in Andbo supervises a pod, so a Job reconciled by another
+controller through `managedBy` gets no deadline applied at all.
 
 Where it fails closed instead of downgrading — all of these exit **2**:
 `network.mode` `allowlist` and `open` are **rejected** (NetworkPolicy selects by

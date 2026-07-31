@@ -50,7 +50,7 @@ import "fmt"
 // fails the render rather than quietly emitting a manifest that re-runs an agent
 // which has already pushed.
 //
-// Three bounds, all real:
+// Four bounds, all real:
 //
 //   - It reaches Spec.BackoffLimit and Spec.Template.Spec.RestartPolicy, and
 //     nothing else. Other batch/v1 fields defeat the same property and are out
@@ -78,6 +78,25 @@ import "fmt"
 //     place by asserting the key is ABSENT rather than that its value is Never,
 //     which is what covers restartPolicyRules and whatever else lands on a
 //     container next.
+//   - Both values are pinned in the MANIFEST and only one of them stays pinned
+//     in the CLUSTER, which is the bound a reader of this guard is most likely
+//     to assume away. restartPolicy rides in spec.template, and EVERY branch of
+//     the update path ends in an immutability check on the template — while the
+//     Job is suspended the only exemptions are container resources and the
+//     scheduling directives, neither of which reaches restartPolicy — so the
+//     kubelet's in-place restarts cannot be turned back on at all. backoffLimit
+//     appears in none of that path's ValidateImmutableField calls, so an update
+//     raises it and the Job controller compares the raised value on its next
+//     sync. The one thing that ends the exposure is the run ending: a Job
+//     carrying a Complete or Failed condition is skipped before the controller
+//     reads the retry budget, so a Job already failed on BackoffLimitExceeded
+//     cannot be re-armed. Do not read the reverse into that. A Job the
+//     controller has not finished can be made to run the agent again WITHOUT
+//     touching backoffLimit, because the controller's own pod deletions are not
+//     counted as failures at all — see the third bound on
+//     runsOnePodWithFreshImages, which is where that mechanism is written down.
+//     This guard runs at render time and can say none of it; EnforcementNotes
+//     does, and TestSecurity_NoRetryBoundsAreStated pins the wording.
 //   - This is not at-most-once EXECUTION, and no field in this manifest can be.
 //     It refuses the retries Andbo would ask for; node failure, preemption, and
 //     pod deletion still start the same run a second time, and nothing stops the

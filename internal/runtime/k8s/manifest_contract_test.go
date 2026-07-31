@@ -170,6 +170,78 @@ func TestSecurity_EveryContainerRePullsItsImage(t *testing.T) {
 	}
 }
 
+// TestSecurity_NoOtherFieldCanStartASecondPod closes the Job spec for the
+// one-pod contract, which had no closure of its own at all.
+//
+// Two closures already walk this same struct, and neither is a substitute,
+// because a closure is not a fence — it is a QUESTION put to whoever adds a
+// field, and the answer only defends the contract the question names. The
+// no-retry closure asks "does this hand back the retries backoffLimit 0
+// refuses?"; the wall-clock closure asks "does this end or restart the clock?".
+// Nothing asked "does this let a second agent run?".
+//
+// Measured on the parent commit, and the measurement is the point. Adding
+// `CompletionMode string \`yaml:"completionMode,omitempty"\“ to jobSpec failed
+// exactly those two closures and no others. Both questions have the same
+// correct answer for that field — completionMode reinstates no retry on its own
+// (backoffLimitPerIndex and maxFailedIndexes are separate fields, still outside
+// both sets) and moves no deadline — so a maintainer who reads both messages and
+// answers both HONESTLY adds it to both allowed sets. Doing exactly that took
+// the WHOLE REPOSITORY green, with no golden regeneration.
+//
+// What it would have shipped: completionMode Indexed is the single switch that
+// unpins completions on a LIVE Job. validateCompletions returns
+// ValidateImmutableField unless the Job is Indexed, so for this manifest
+// completions is fixed at apply time — that is the whole reason the one-pod
+// property survives, since parallelism is freely mutable and is capped by
+// completions rather than the other way round. Under Indexed, completions
+// becomes mutable "only in tandem with parallelism", which is not a loophole
+// that leaks one pod but the one that delivers CONCURRENT agents on one
+// repository with one set of credentials. The rendered manifest still reads
+// `completions: 1` and `parallelism: 1` throughout, and
+// runsOnePodWithFreshImages still passes: the guard reads the constructed Job,
+// and the Job it reads is correct.
+//
+// Only the Job spec is closed here, and the two levels below it are deliberately
+// not re-closed:
+//
+//   - The pod spec decides nothing about how many pod ATTEMPTS a Job makes; that
+//     is Job-level in batch/v1 without exception.
+//   - Containers are already closed once, by the no-retry test, and that closure
+//     rejects ANY field outside its set rather than any field bearing on
+//     restarts — so a container field is stopped whatever it does. The
+//     attribution gap that justifies this test at Job level has no counterpart
+//     there today: the container half of this contract is imagePullPolicy, and
+//     batch/v1 has no second container field that decides what the kubelet
+//     resolves. Re-closing it would be a map kept in step with another map to
+//     catch a field that does not exist.
+func TestSecurity_NoOtherFieldCanStartASecondPod(t *testing.T) {
+	// Exactly the fields jobSpec declares, re-decided for the one-pod contract.
+	allowedOnJobSpec := map[string]bool{
+		"backoffLimit":            true,
+		"completions":             true,
+		"parallelism":             true,
+		"activeDeadlineSeconds":   true,
+		"ttlSecondsAfterFinished": true,
+		"template":                true,
+	}
+
+	for name, spec := range transportSpecs(t) {
+		t.Run(name, func(t *testing.T) {
+			manifest, err := spec.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil", err)
+			}
+			renderedJobSpec, ok := dig(t, docs(t, manifest)[1], "spec").(map[string]any)
+			if !ok {
+				t.Fatal("job spec is not a mapping")
+			}
+			assertClosed(t, "spec", declaredKeys(t, reflect.TypeOf(jobSpec{})), renderedJobSpec, allowedOnJobSpec,
+				"the one-pod contract; a Job field outside this set can add pod attempts the rendered completions and parallelism do not describe, or unpin the field that is holding the count down. completionMode is the measured case and the reason this closure exists separately: it reinstates no retry and moves no deadline, so it passes both of the other two closures honestly, and it makes completions MUTABLE ON A LIVE JOB — only in tandem with parallelism, which is concurrent agents on one repository. (spec.scheduling is the same shape in current batch/v1: its gang minCount is bounded by parallelism and is updatable after creation.)")
+		})
+	}
+}
+
 // TestRunsOnePodWithFreshImages exercises the render-time guard directly, on
 // constructed Jobs the public API cannot produce. It is what makes the property
 // enforceable rather than merely asserted: a future edit that adds a third
@@ -538,6 +610,37 @@ func TestSecurity_NoRetryBoundsAreStated(t *testing.T) {
 		{"the extra start gets the full grace period, not an instant", "defaults to 30 seconds"},
 		{"a failed Job does not mean the agent did nothing", "cannot tell from the job whether the agent committed or pushed"},
 		{"no-retry is not at-most-once execution", "neither field is at-most-once execution"},
+		// What the manifest is still worth once it has been applied, which
+		// nothing in this note used to say. The two fields are one control on two
+		// axes — and they are ALSO one control whose two halves the API server
+		// treats oppositely on update, which is the fact an operator reviewing a
+		// manifest most needs and the one the symmetry of the note most obscures.
+		// Verified verbatim against upstream master: every branch of
+		// validatePodTemplateUpdate ends in ValidateImmutableField on the template,
+		// while ValidateJobSpecUpdate's ValidateImmutableField calls name selector,
+		// completionMode, podFailurePolicy, backoffLimitPerIndex, managedBy and
+		// successPolicy — and not backoffLimit.
+		//
+		// Every clause below FUSES POLARITY TO SUBJECT, and that is a correction.
+		// The first draft asserted "only one of the two survives the apply",
+		// "refuses to change the template at all" and "raises it on a running job",
+		// and review took the whole repository GREEN on a note rewritten to say
+		// backoffLimit is the pinned half and restartPolicy the loose one — the
+		// exact inversion of upstream. Each of those matched a rewrite that
+		// negated it ("nobody RAISES IT ON A RUNNING JOB"), because they pinned the
+		// rule without pinning WHICH FIELD it lands on. An anchor that names a
+		// field and its direction in one breath cannot survive being swapped.
+		{"restartPolicy is the half the API server holds", "restartpolicy cannot be changed on this job at all"},
+		{"backoffLimit is the half nothing holds", "backofflimit is the half nothing pins"},
+		{"the retry the manifest refuses is one update away", "is one edit away for as long as the agent is alive"},
+		// The bound on the exposure, stated as precisely as the exposure itself.
+		// Raising backoffLimit is not a way to resurrect a run that already
+		// finished: syncJob returns for a Job carrying a Complete or Failed
+		// condition before it reads the retry budget. An operator told only the
+		// alarming half goes looking for a mitigation that already exists — but
+		// the clause is phrased to assert the WINDOW exists, since a reassuring
+		// bound on its own is something an overclaiming rewrite keeps gladly.
+		{"the window closes only when the run does", "only the job's own end closes that window"},
 	} {
 		if !strings.Contains(notes, want.substr) {
 			t.Errorf("enforcement notes do not state the bound %q (looking for %q):\n%s", want.topic, want.substr, notes)
@@ -555,8 +658,24 @@ func TestSecurity_NoRetryBoundsAreStated(t *testing.T) {
 // ("digest", "parallelism 1") only proves a note about the subject exists —
 // review demonstrated that such a test passes when both notes are replaced by
 // pure overclaims that happen to use the same vocabulary, which is the failure
-// this whole commit exists to remove, one level up. A clause that states the
-// limit cannot survive being rewritten into a guarantee.
+// this whole commit exists to remove, one level up.
+//
+// The rule these clauses follow, and it took two rounds of review to get right:
+// FUSE POLARITY TO SUBJECT. An anchor that pins a rule without naming the field
+// it lands on ("refuses to change the template at all") survives having the
+// fields swapped underneath it, and an anchor phrased as a verb phrase ("raises
+// it on a running job") survives being negated in front of ("nobody raises it on
+// a running job"). Both were measured: an inverted set of notes claiming
+// backoffLimit is the pinned half kept every anchor of the first draft and took
+// the whole repository green. Each anchor is now a complete claim that has to be
+// DELETED to state the opposite.
+//
+// The honest bound on all of this: these are substring matches over prose, so
+// they resist a careless rewrite, not a deliberate one. A fluent note asserting
+// the opposite now fails — verified — but text that quotes an anchor in order to
+// contradict it ("X is a myth") still passes, and no substring check can help
+// with that. What these assertions defend against is a maintainer softening a
+// note without noticing what it was for; they are not a proof of truthfulness.
 func TestSecurity_OnePodAndFreshImageBoundsAreStated(t *testing.T) {
 	notes := strings.ToLower(strings.Join(validSpec().EnforcementNotes(), "\n"))
 
@@ -566,6 +685,42 @@ func TestSecurity_OnePodAndFreshImageBoundsAreStated(t *testing.T) {
 		{"only a digest reference makes it an identity guarantee", "identity guarantee only when the reference is a digest"},
 		{"Andbo does not vouch for the image it names", "does not sign, verify, or admit"},
 		{"one pod scheduled is not one execution", "not a count of how many times the agent runs"},
+		// The apply-time half. Only completions is held, and the reason is a
+		// three-step chain a reader cannot be expected to reconstruct:
+		// validateCompletions makes completions immutable only for a non-Indexed
+		// Job, this Job is non-Indexed because the renderer emits no completionMode
+		// and SetDefaults_Job stores NonIndexed, and completionMode is itself in
+		// the immutable set so the Job cannot be switched later. A note that
+		// claimed "completions is immutable" flat would be an overclaim about
+		// batch/v1 and would stop being true the moment this renderer emitted a
+		// completionMode.
+		{"completions is the one field the cluster holds", "completions is the only one of the two the cluster holds"},
+		{"and it is held only because the mode cannot change", "it cannot become indexed later"},
+		// parallelism, and this is a CORRECTION rather than an addition. The first
+		// draft called it "freely mutable and merely INERT" on the strength of
+		// manageJob capping wanted pods at completions, and review falsified it
+		// against the controller: the reasoning covered only the RAISING
+		// direction. Lowering parallelism to 0 is a legal update
+		// (validateJobSpec asks only for nonnegative), and manageJob then deletes
+		// the running pod through deleteJobPods — which strips the job-tracking
+		// finalizer BEFORE issuing the delete, so getValidPodsWithFilter and
+		// trackJobStatusAndRemoveFinalizers both skip that pod and no failure is
+		// ever counted against backoffLimit 0. The Job stays alive with Active 0,
+		// and raising parallelism back starts the agent over. Do it quickly and
+		// the replacement is created while the original is still inside its
+		// termination grace period, because manageJob subtracts `terminating`
+		// from the pod-creation diff only under podReplacementPolicy Failed,
+		// which this renderer never emits. So parallelism is the concurrency
+		// vector the note used to rule out.
+		{"parallelism is not inert", "parallelism is a restart switch and not a no-op"},
+		{"lowering it deletes the pod uncounted", "without counting a failure against backofflimit"},
+		{"raising it again re-runs the agent", "starts the agent over"},
+		{"immutability is of this Job object and no wider", "delete-and-recreate is not an update"},
+		// The pull policy's own apply-time status, with the limit fused on. The
+		// first draft anchored "same template immutability", which review showed
+		// was a pure topic match: the clause it was meant to bound survived being
+		// deleted outright. Anchor the LIMIT instead.
+		{"the pull policy is held but what it resolves to is not", "what no immutability can hold is what the registry serves"},
 	} {
 		if !strings.Contains(notes, want.substr) {
 			t.Errorf("enforcement notes do not state the bound %q (looking for %q):\n%s", want.topic, want.substr, notes)
@@ -688,18 +843,30 @@ func TestSecurity_WallClockBoundsAreStated(t *testing.T) {
 		{"the grace period is a ceiling, not a duration", "ceiling and not a duration"},
 		{"a push that overruns is killed part-way", "sigkilled mid-flight"},
 		{"a Job that hit its deadline is not a Job that did nothing", "is not evidence that the agent did nothing"},
-		// This clause replaced an overclaim, and the overclaim was pinned here.
-		// The note used to say a suspend/resume cycle hands the run a fresh full
-		// budget "each time" — true of a generic Job, false of this manifest, and
-		// review caught it against the controller source. backoffLimit 0 makes
-		// the first suspend of a RUNNING Job terminal: the suspend deletes the
-		// pod, isPodFailed counts a deleted pod as failed (the exemption needs
-		// podReplacementPolicy Failed, defaulted only alongside a podFailurePolicy
-		// this renderer never emits), and 1 > 0 finishes the Job as
-		// BackoffLimitExceeded. Asserting the CONSEQUENCE rather than the
-		// mechanism is the point: a note that describes suspend/resume correctly
-		// and draws the wrong conclusion is what was here before.
-		{"suspending a running Job ends it rather than pausing it", "does not pause an andbo run, it kills it"},
+		// This clause has now been wrong in BOTH directions, and the second time
+		// is more instructive than the first. It began as "a suspend/resume cycle
+		// hands the run a fresh full budget each time"; review corrected that to
+		// "a suspend does not pause an Andbo run, it kills it", reasoning that
+		// the suspend deletes the pod, isPodFailed counts a deleted pod as
+		// failed, and 1 > 0 finishes the Job against backoffLimit 0. That
+		// reasoning named a real exemption (podReplacementPolicy Failed) but the
+		// WRONG one, and re-review caught it against the controller: the operative
+		// exemption is that deleteJobPods strips the job-tracking finalizer BEFORE
+		// issuing the delete, and both counting paths skip a finalizer-less pod.
+		// Upstream's real distinction is not which policy is set — it is WHO
+		// deleted the pod. A controller-initiated deletion (suspend, or scaling
+		// parallelism down) is uncounted; an externally-initiated one keeps its
+		// finalizer and IS counted.
+		//
+		// So the ORIGINAL claim was closer to true than its correction. A suspend
+		// neither pauses nor kills: the Job takes a JobSuspended condition, stays
+		// unfinished, and resume unconditionally resets status.startTime to now —
+		// which hands the run a fresh full budget AND starts the agent over. The
+		// lesson pinned here is that a confident mechanism is not evidence: two
+		// successive notes described the controller accurately and drew opposite
+		// wrong conclusions from it.
+		{"suspend and resume is a budget reset, not a pause and not a kill", "hands the run a fresh full budget and starts the agent over"},
+		{"the deletion a suspend causes is not counted as a failure", "the controller strips that finalizer before it deletes"},
 		{"the immutable list is spec fields, not the whole update path", "not everything the update path checks"},
 		// The suspend/resume route was documented first and is the more
 		// interesting one, which is exactly why it must not stand alone: it
@@ -764,10 +931,22 @@ func declaredKeys(t *testing.T, typ reflect.Type) []string {
 	return out
 }
 
-// assertClosed checks both directions at once: every key the struct DECLARES and
-// every key the manifest RENDERED must be in the allowed set. contract names the
-// property being defended, so a maintainer who adds a field is told which
-// decision they are being asked to make.
+// assertClosed checks three directions: every key the struct DECLARES and every
+// key the manifest RENDERED must be in the allowed set, and every key the
+// allowed set names must actually be declared. contract names the property
+// being defended, so a maintainer who adds a field is told which decision they
+// are being asked to make.
+//
+// The third direction is the one that is easy to leave out, and review proved
+// the cost. With only the first two, a key can be PRE-AUTHORISED: a test-only
+// diff that adds "completionMode" to the allowed sets changes no manifest byte,
+// renders nothing, touches no production code, and takes the whole repository
+// green — while silently disarming every closure for a field that lands in a
+// later commit. The same asymmetry lets an entry go stale when a field is
+// removed, permanently disarming the check for whatever reclaims that name. An
+// allowed set is a record of decisions ABOUT FIELDS THAT EXIST, so a name in it
+// with no field behind it is either a decision made too early or one that
+// outlived its subject.
 func assertClosed(t *testing.T, path string, declared []string, rendered map[string]any, allowed map[string]bool, contract string) {
 	t.Helper()
 	seen := map[string]bool{}
@@ -780,6 +959,11 @@ func assertClosed(t *testing.T, path string, declared []string, rendered map[str
 	for k := range rendered {
 		if !allowed[k] && !seen[k] {
 			t.Errorf("%s.%s is rendered without a struct field of that name behind it and is not part of %s. %s", path, k, contract, closureAdvice)
+		}
+	}
+	for k := range allowed {
+		if _, isRendered := rendered[k]; !seen[k] && !isRendered {
+			t.Errorf("%s.%s is allowed by %s but no manifest struct field and no rendered key carries that name. Either it was authorised before it existed — which disarms this closure for whatever lands under that name next — or it outlived the field it was decided about. Remove it, or add the field the decision was made for", path, k, contract)
 		}
 	}
 }

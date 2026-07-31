@@ -38,7 +38,7 @@ func (p podSpec) allContainers() []container {
 // appended to either list without a pull policy fails the render rather than
 // quietly running an older image.
 //
-// Two bounds, both real:
+// Three bounds, all real:
 //
 //   - It reaches the container lists podSpec.allContainers names, and nothing
 //     else. A container declared in a NEW list — ephemeralContainers, or
@@ -47,6 +47,43 @@ func (p podSpec) allContainers() []container {
 //     pull policy at all, passed the whole suite. The structural check in
 //     assertHardened is the backstop, because it matches any mapping that names
 //     an image rather than any list this file happens to know about.
+//
+//   - The same apply-time bound the no-retry guard carries, and it decides which
+//     half of this check is worth anything an hour into a run. completions is
+//     immutable on a live Job — but by a chain rather than by the field being
+//     special: the update path lets it move only for an Indexed Job, this Job is
+//     non-Indexed because no completionMode is emitted and the API server
+//     defaults an absent one to NonIndexed, and completionMode is itself
+//     immutable, so it cannot be switched afterwards. imagePullPolicy is held
+//     for a different reason, that it rides in the immutable pod template.
+//
+//     parallelism is held by NOTHING, and the first version of this bound got
+//     that wrong in a way worth recording, because the error was a correct
+//     argument applied in one direction only. It said parallelism was "freely
+//     mutable and merely inert", reasoning that the controller wants
+//     completions-minus-successes pods and caps that by parallelism rather than
+//     the reverse — true, and it does rule out a concurrent second pod from
+//     RAISING parallelism. Lowering it is the other direction. parallelism 0 is
+//     a legal update, the controller then deletes the running pod, and here is
+//     the mechanism this package had never modelled: the controller strips the
+//     job-tracking finalizer BEFORE issuing its own deletes, and both counting
+//     paths skip a finalizer-less pod, so that deletion is never a failure and
+//     backoffLimit 0 is never reached. The Job survives with no pod, and putting
+//     parallelism back starts the agent over. Done quickly, the replacement
+//     lands while the original is still terminating, because terminating pods
+//     are subtracted from the creation diff only under a podReplacementPolicy
+//     this renderer does not emit. The same mechanism is why a suspend does not
+//     end an Andbo run either.
+//
+//     So this guard's completions check is the half the cluster keeps and its
+//     parallelism check is decoration once the manifest is applied. A field that
+//     broke the completions chain would pass this guard while rendering
+//     correctly, which is why the Job-level key set is closed for THIS contract
+//     by TestSecurity_NoOtherFieldCanStartASecondPod rather than left to the
+//     closures the other two contracts own — completionMode passes both of those
+//     honestly. EnforcementNotes states the bound and
+//     TestSecurity_OnePodAndFreshImageBoundsAreStated pins the wording.
+//
 //   - Same as bindsPolicyToPod: no test can prove this was CALLED, since
 //     deleting the call site changes no output while render is correct. The
 //     properties themselves are pinned on the rendered manifest by

@@ -78,6 +78,77 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **Kubernetes renderer: the no-retry and one-pod contracts were stated as
+  properties of the run, and only some of them survive being applied.** The
+  wall-clock note already said `activeDeadlineSeconds` is mutable on a live Job;
+  the two notes beside it said nothing, so a reviewer reading a manifest was
+  entitled to assume all of it held for the life of the run. Verified verbatim
+  against upstream master rather than assumed, and the answer differs per field.
+  The pod template is immutable while the Job is not suspended, so
+  `restartPolicy: Never` and `imagePullPolicy: Always` are held. `completions: 1`
+  is held by a three-step chain — `validateCompletions` allows a change only for
+  an `Indexed` Job, this Job is `NonIndexed` because the renderer emits no
+  `completionMode` and `SetDefaults_Job` stores that default, and `completionMode`
+  is itself immutable. **`backoffLimit: 0` and `parallelism: 1` are held by
+  nothing**: raising `backoffLimit` re-arms the replacement pod on the
+  controller's next sync for as long as the run is alive — bounded only by the
+  run's end, since a Job already `Complete` or `Failed` is skipped before the
+  retry budget is read.
+- **Kubernetes renderer: `parallelism` is a restart switch, and two notes said it
+  was harmless.** Adversarial re-review falsified a claim made in the first draft
+  of the change above — that `parallelism` is "freely mutable and merely inert"
+  because the controller caps wanted pods at `completions` minus successes. That
+  argument is sound in the RAISING direction only. `parallelism: 0` is an equally
+  legal update, and it exposes a mechanism this package had never modelled: **the
+  Job controller strips a pod's tracking finalizer before issuing its own deletes,
+  and every failure-counting path skips a finalizer-less pod.** So scaling to 0
+  deletes the running agent while counting no failure against `backoffLimit: 0`;
+  the Job survives with no pod; scaling back to 1 starts the agent over on a
+  half-written workspace. Done quickly, the replacement is created while the
+  original is still terminating — concurrent agents on one repository — because
+  terminating pods are subtracted from the creation diff only under a
+  `podReplacementPolicy` this renderer does not emit.
+- **Kubernetes renderer: "suspending a running Job ends it" was wrong, and it was
+  wrong as a *correction*.** The same finalizer mechanism falsifies it. The note
+  originally said a suspend/resume cycle hands the run a fresh budget; that was
+  "corrected" to say a suspend kills the run, reasoning that the deleted pod
+  counts as a failure against `backoffLimit: 0` — which is true of a pod deleted
+  by anyone *else*, and false for the controller's own deletions. Upstream's real
+  distinction is who deleted the pod, not which `podReplacementPolicy` is set. The
+  original claim was closer to true: a suspend neither pauses nor kills, the Job
+  stays unfinished, and resume resets `status.startTime` — so suspend/resume is an
+  unbounded wall-clock extension *and* a way to re-run an agent that has already
+  pushed. Two successive notes described the controller accurately and drew
+  opposite wrong conclusions from it; the test now pins that lesson.
+- **Kubernetes renderer: the apply-time assertions were topic-shaped, so a note
+  could be inverted and stay green.** Review rewrote all three notes to say
+  `backoffLimit` is the pinned half, `restartPolicy` the loose one, and
+  `parallelism` immutable — keeping every asserted substring verbatim — and took
+  the **whole repository green**. Anchors like `"refuses to change the template at
+  all"` pinned a rule without pinning which field it lands on, and `"raises it on
+  a running job"` survived being negated (`"nobody raises it on a running job"`).
+  Every clause now fuses polarity to subject.
+- **Kubernetes renderer: an allowed key could be authorised before the field
+  existed.** `assertClosed` checked declared⊆allowed and rendered⊆allowed, never
+  allowed⊆declared, so a test-only diff adding `"completionMode": true` to the
+  three allowed sets changed no manifest byte, touched no production code, went
+  green, and silently disarmed all three closures for a field landing in a later
+  commit. The reverse direction is now checked.
+- **Kubernetes renderer: the one-pod contract had no closed key set of its own,
+  and the two closures covering that struct ask other contracts' questions.** A
+  closure is a question put to whoever adds a field, and it defends only the
+  contract it names. Measured on the parent commit: adding `CompletionMode` to the
+  Job spec struct failed exactly the no-retry and wall-clock closures — and
+  `completionMode` reinstates no retry and moves no deadline, so a maintainer
+  answering both messages **honestly** adds it to both allowed sets, which took
+  the **whole repository green with no golden regeneration**. What that ships is
+  the single switch that unpins `completions` on a live Job, and under `Indexed`
+  it is mutable *only in tandem with `parallelism`* — concurrent agents on one
+  repository with one set of credentials, while the manifest still renders
+  `completions: 1` and `parallelism: 1` and the render-time guard still passes.
+  `TestSecurity_NoOtherFieldCanStartASecondPod` now asks the pod-count question at
+  Job level; the pod and container levels are deliberately not re-closed, for
+  reasons stated on the test.
 - **Kubernetes renderer: both manifest key-set closures were blind to any field
   added with `omitempty`.** The closures walked the keys the FIXTURE rendered, so
   a field left at its zero value by `validSpec()` was invisible to them — and
