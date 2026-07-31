@@ -20,13 +20,28 @@ var (
 	envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
-// reservedNamespaces are cluster-control namespaces. Scheduling an agent there
-// would place it next to control-plane workloads and their service accounts.
-var reservedNamespaces = map[string]bool{
-	"kube-system":     true,
-	"kube-public":     true,
-	"kube-node-lease": true,
-}
+// reservedNamespacePrefix is the prefix Kubernetes reserves for its own system
+// namespaces. Scheduling an agent in one would place it next to control-plane
+// workloads and their service accounts.
+//
+// The check is on the PREFIX rather than on a list of names. The three
+// namespaces every cluster ships — kube-system, kube-public, kube-node-lease —
+// are not the whole set: the flannel CNI installs into kube-flannel, and the
+// prefix is reserved precisely so distributions can add more. A list would
+// silently stop covering whatever the next one is called.
+//
+// The consequence is more than co-tenancy. EnforcementNotes names another
+// NetworkPolicy in the same namespace as the way this Job's default-deny is
+// defeated: policies are ADDITIVE, so whatever the cluster's own components
+// already have in their namespace, this one cannot subtract from it.
+//
+// The prefix bounds the guard to what Kubernetes itself reserves. It does NOT
+// cover the system namespaces other projects and distributions choose for
+// themselves — calico-system, tigera-operator, istio-system, openshift-*,
+// metallb-system — which this renderer has no way to recognise. Note 3 of
+// EnforcementNotes is the standing answer for those: run agents in a dedicated
+// namespace, and audit the policy objects before applying.
+const reservedNamespacePrefix = "kube-"
 
 // reservedMountPaths are directories the container image or the kernel owns.
 // The working directory is mounted as an EMPTY volume, so overlaying any of
@@ -142,8 +157,8 @@ func (s JobSpec) Validate() error {
 		add("namespace %q is not a DNS-1123 label; use lowercase letters, digits, and '-'", s.Namespace)
 	case len(s.Namespace) > MaxNamespaceLength:
 		add("namespace is %d characters; Kubernetes namespace names are limited to %d", len(s.Namespace), MaxNamespaceLength)
-	case reservedNamespaces[s.Namespace]:
-		add("namespace %q is reserved for cluster control-plane workloads; use a dedicated namespace for agent runs", s.Namespace)
+	case strings.HasPrefix(s.Namespace, reservedNamespacePrefix):
+		add("namespace %q is reserved for cluster control-plane workloads: Kubernetes reserves the %q prefix for its own system namespaces, so a Job there shares a namespace with cluster components and their service accounts. NetworkPolicies are also additive, so whatever policy that namespace already carries, this Job's default-deny cannot subtract from it. Use a dedicated namespace for agent runs (e.g. \"andbo-runs\")", s.Namespace, reservedNamespacePrefix)
 	}
 
 	// Workload.

@@ -110,6 +110,72 @@ func TestSecurity_NamespaceLengthIsBounded(t *testing.T) {
 	}
 }
 
+// TestSecurity_ReservedNamespacePrefixIsRefused covers the namespaces an agent
+// must never land in.
+//
+// This is not hygiene. EnforcementNotes names another NetworkPolicy in the same
+// namespace as the way this Job's default-deny is silently defeated — policies
+// are additive and cannot subtract from one another — so a namespace owned by
+// the cluster's own components is the one place the deny is least able to hold.
+// Every cluster ships more of those than the three the API reserves by name.
+func TestSecurity_ReservedNamespacePrefixIsRefused(t *testing.T) {
+	refused := []string{
+		// The three every cluster ships.
+		"kube-system", "kube-public", "kube-node-lease",
+		// The flannel CNI installs into kube-flannel.
+		"kube-flannel",
+		// The PREFIX is what is reserved, so the tail does not matter: these
+		// are arbitrary names under it, not namespaces known to exist.
+		"kube-apiserver", "kube-ovn", "kube-a",
+	}
+	for _, ns := range refused {
+		t.Run("refused/"+ns, func(t *testing.T) {
+			s := validSpec()
+			s.Namespace = ns
+
+			// Assert on Render, not Validate: Render is the only surface that
+			// produces bytes an operator can apply, so it is the one that has to
+			// refuse.
+			_, err := s.Render()
+			if err == nil {
+				t.Fatalf("Render() accepted namespace %q, want a rejection", ns)
+			}
+			// Pin all three parts the project requires of an error — what
+			// failed, why, and how to fix it. Without the "additive" clause the
+			// whole reason can be deleted and only the bare assertion "this is
+			// reserved" survives, which is not something an operator can weigh.
+			for _, want := range []string{ns, "reserved", "additive", "dedicated namespace"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error does not contain %q, so it does not explain what failed, why, and how to fix it:\n%v", want, err)
+				}
+			}
+		})
+	}
+
+	// The guard has to be a PREFIX test. A substring or fuzzy one would refuse
+	// ordinary namespaces an operator may legitimately dedicate to agent runs,
+	// and a renderer that refuses the safe case teaches operators to work around
+	// it. "default" belongs here too: `andbo k8s render` WARNS about it rather
+	// than refusing, and its warning is printed before validation runs — so
+	// refusing it here would print the advice and then reject the render anyway.
+	allowed := []string{"kube", "kubeflow", "kubernetes-dashboard", "andbo-kube-runs", "default", "andbo-runs"}
+	for _, ns := range allowed {
+		t.Run("allowed/"+ns, func(t *testing.T) {
+			s := validSpec()
+			s.Namespace = ns
+
+			manifest, err := s.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil for namespace %q", err, ns)
+			}
+			assertHardened(t, manifest)
+			if got := dig(t, docs(t, manifest)[1], "metadata", "namespace"); got != ns {
+				t.Errorf("Job metadata.namespace = %v, want %q", got, ns)
+			}
+		})
+	}
+}
+
 // TestSecurity_TimeoutOverflowFailsClosed covers durations large enough that
 // rounding up to whole seconds overflows int64 and yields a negative deadline —
 // an unbounded run if the caller trusts the mapping without re-validating.
