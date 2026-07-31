@@ -78,24 +78,25 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
-- **Kubernetes renderer: `backoffLimit: 0` was documented as if it stopped
-  retries on its own, and nothing enforced the `restartPolicy: Never` it
-  actually depends on.** The two fields are one control on two axes: the Job
-  controller creates replacement *pods* up to `backoffLimit`, while the kubelet
-  restarts the failed *container* in place under `restartPolicy: OnFailure` —
-  and an in-place restart is not a pod failure, so it never consumes
-  `backoffLimit`. `OnFailure` alongside `backoffLimit: 0` would restart the
-  agent repeatedly on the same half-written workspace while the manifest still
-  read as no-retries. Both values are now refused at render time by
-  `retriesNothingAfterFailure`, so a future edit that makes either field
-  caller-supplied fails the render instead of emitting a manifest that re-runs
-  an agent which has already committed and pushed. Previously they were pinned
-  only by the byte-for-byte goldens (which `-update` rewrites) and a single
-  assertion on one spec; they are now asserted by name, for presence as well as
-  value, across every workspace transport — absence matters because the API
-  server defaults an omitted `backoffLimit` to **6**. The enforcement note now
-  states the pairing and keeps the existing bound that neither field gives
-  at-most-once execution.
+- **Kubernetes renderer: nothing enforced the no-retry contract at render time,
+  and the enforcement note described `backoffLimit: 0` as if `restartPolicy`
+  did not bear on it.** The rendered manifest is unchanged and always carried
+  both values; this hardens what holds them there and corrects what is claimed
+  about them. `backoffLimit` bounds replacement *pods* from the Job controller;
+  `restartPolicy` decides whether the kubelet restarts the *container* in
+  place. The kubelet acts first, so `OnFailure` lets the agent start a second
+  time on the half-written workspace of the first before the Job controller —
+  which does count that restart — fails the Job and destroys the pod's logs.
+  One extra start, not unbounded retries, and enough to commit or push twice.
+  Both values are now refused at render time, and asserted by name for presence
+  as well as value across every workspace transport (previously by one
+  assertion each, on one spec). Because a guard reading named struct fields
+  cannot see a field that does not exist yet, the rendered `Job.spec` key set
+  is now closed and no container may carry its own `restartPolicy`: a later
+  `podFailurePolicy` — whose `action: Ignore` genuinely does make
+  `backoffLimit: 0` inert, and which is valid only alongside
+  `restartPolicy: Never` — fails a test that names it, rather than only a
+  golden diff that `-update` would erase.
 - **Kubernetes renderer: the reserved-namespace guard only knew the prefix
   Kubernetes reserves, so every namespace a privileged add-on owns rendered
   clean.** `--namespace cert-manager`, `kyverno`, `gatekeeper-system`,

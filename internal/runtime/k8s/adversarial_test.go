@@ -51,13 +51,18 @@ var (
 	// walk into.
 	//
 	// This list can only speak for keys that were RENDERED: a field that
-	// disappears passes it, and for every key here absence is itself a
-	// weakening, since the API server then supplies a default (backoffLimit 6,
-	// restartPolicy Always, completions nil under an explicit parallelism).
-	// Presence is asserted by the named property tests in
-	// manifest_contract_test.go, not here. The container check below is the
-	// exception that does its own presence assertion inline, because it has to
-	// reach containers in lists that do not exist yet.
+	// disappears passes it. For three of the four that is a weakening in
+	// itself, because the API server then supplies something else —
+	// backoffLimit 6, restartPolicy Always (which it then rejects outright for
+	// a Job template), and completions nil, since it defaults completions only
+	// when parallelism is unset too and this renderer always emits parallelism.
+	// parallelism is the exception: it defaults to 1, which is the pinned
+	// value, so its absence costs the contract that the manifest fully
+	// describes the run rather than the property itself. Presence is asserted
+	// by the named property tests in manifest_contract_test.go, not here. The
+	// container check below is the exception that does its own presence
+	// assertion inline, because it has to reach containers in lists that do not
+	// exist yet.
 	mustEqual = map[string]any{
 		"parallelism":   1,
 		"completions":   1,
