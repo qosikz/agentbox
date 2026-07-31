@@ -297,6 +297,13 @@ func TestSecurity_DenyAllBoundsAreStated(t *testing.T) {
 		t.Fatalf("no enforcement note contains %q, so the deny-all's apply-time bound is not stated at all", anchor)
 	}
 
+	// Each substring has to be DISCRIMINATING, not merely present, and the
+	// first draft of this table was not. "still" appeared eight times in a note
+	// that is largely about what survives an edit, so replacing the whole
+	// survival claim with its opposite — "any of the three may also remove the
+	// object outright" — left this test green. "egress rule" was the same kind
+	// of accident, matching the "no egress rules" of a different sentence. Pin
+	// the phrase that carries the claim, not a word the claim happens to use.
 	for _, want := range []struct{ topic, substr string }{
 		// The mechanism, named precisely enough to be checkable against
 		// upstream rather than merely plausible.
@@ -304,12 +311,13 @@ func TestSecurity_DenyAllBoundsAreStated(t *testing.T) {
 		// The three edits that follow from it, since each defeats the policy in
 		// a different way and a reader who knows only one will look for the
 		// wrong thing.
-		{"a rule can be added to the live policy", "egress rule"},
-		{"a direction can be dropped", "policytypes"},
-		{"the selector can be repointed", "podselector"},
+		{"a rule can be added to the live policy", "adding an egress rule"},
+		{"a direction can be dropped", "dropping \"egress\" from policytypes"},
+		{"the selector can be repointed", "repointing podselector"},
 		// Why it is quieter than the deletion the sibling note already covers:
-		// the object is still there, still named -deny-all, still bound.
-		{"the object survives the edit", "still"},
+		// the object survives all three edits, so it still reads as bound.
+		{"none of the edits removes the object", "none of the three deletes anything"},
+		{"so it still reads as bound to the run", "still named for the run"},
 		// Where it is actually refused. Nothing rendered can refuse it.
 		{"RBAC is where it is refused", "rbac"},
 		// The claim's altitude, stated the way the sibling contracts state
