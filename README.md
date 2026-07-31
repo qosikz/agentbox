@@ -467,13 +467,16 @@ Two of those need their limits read with them. `parallelism: 1` bounds what the
 **Job schedules** and is not at-most-once execution — the cluster can still start
 the same run twice (node failure, preemption, pod deletion), and nothing stops a
 second Job being applied from the same manifest, so agent side effects still have
-to be idempotent or keyed by a run ID. And `imagePullPolicy: Always` re-resolves
-the image **reference** on every start, so a node cannot silently serve a stale or
-tampered cached layer for it — but re-resolving a *mutable tag* can return
-different bytes each time. It is an identity guarantee only when `runtime.image`
-is pinned by digest. The pull itself is the kubelet's, from whatever registry and
-credentials the node has: Andbo neither signs, verifies, nor admits the image, and
-the `NetworkPolicy` does not restrict the pull.
+to be idempotent or keyed by a run ID. And `imagePullPolicy: Always` makes the
+kubelet re-resolve the image **reference** at the registry on every start, so a
+node cannot go on serving what it resolved for that reference earlier. That is a
+*freshness* control, **not tamper detection**: once the reference resolves to a
+digest the node already stores, the container runtime reuses the cached layers
+and nothing re-verifies them. It is an identity guarantee only when
+`runtime.image` is pinned by digest, since re-resolving a mutable tag can return
+different bytes each time. The pull itself is the kubelet's, from whatever
+registry and credentials the node has: Andbo neither signs, verifies, nor admits
+the image, and the `NetworkPolicy` does not restrict the pull.
 
 Where it fails closed instead of downgrading — all of these exit **2**:
 `network.mode` `allowlist` and `open` are **rejected** (NetworkPolicy selects by

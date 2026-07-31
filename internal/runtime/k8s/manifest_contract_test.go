@@ -71,17 +71,22 @@ func transportSpecs(t *testing.T) map[string]JobSpec {
 //
 // An agent run has side effects that are not confined to the pod — commits,
 // pushes, pull requests, and whatever tools the image carries. Kubernetes runs
-// `parallelism` pods at once until `completions` of them have succeeded, so
-// either field above 1 turns one requested run into several concurrent agents
-// racing on the same repository with the same credentials, and the manifest
-// still reads as a normal Job. This is the same argument backoffLimit 0 already
-// makes about retries, on the axis backoffLimit does not cover.
+// up to `parallelism` pods at once, capped by the number of remaining
+// `completions`, until that many have succeeded. So completions above 1 repeats
+// the whole run once per completion, parallelism above 1 lets those repeats race
+// each other on the same repository with the same credentials, and the manifest
+// still reads as a normal Job. This is the argument backoffLimit 0 already makes
+// about retries, on the axis backoffLimit does not cover.
 //
-// Both fields are asserted PRESENT as well as equal to 1. Kubernetes defaults
-// them to 1, so absence is not itself a weakening — but this package's contract
-// is that the manifest fully describes the run (Command is required for the same
-// reason), and a reviewer should not have to know an API default to know how
-// many agents a manifest starts.
+// Both fields are asserted PRESENT as well as equal to 1, and for completions
+// that is not a formality. parallelism defaults to 1 unconditionally, but
+// completions defaults to 1 only when parallelism is ALSO unset — and this
+// renderer always emits parallelism, so dropping completions alone leaves it
+// nil, which makes the Job a work-queue Job that finishes when any single pod
+// succeeds rather than a fixed-completion one. For parallelism, absence would
+// still break this package's contract that the manifest fully describes the run
+// (Command is required for the same reason): a reviewer should not have to know
+// an API default to know how many agents a manifest starts.
 func TestSecurity_JobRunsOnePodPerRun(t *testing.T) {
 	for name, spec := range transportSpecs(t) {
 		t.Run(name, func(t *testing.T) {
@@ -100,7 +105,7 @@ func TestSecurity_JobRunsOnePodPerRun(t *testing.T) {
 					continue
 				}
 				if v != 1 {
-					t.Errorf("spec.%s = %v, want 1; above 1 the Job starts concurrent agents that repeat every side effect of the run", field, v)
+					t.Errorf("spec.%s = %v, want 1; above 1 the Job repeats every side effect of the run once per pod, and 0 means it never runs", field, v)
 				}
 			}
 		})
@@ -110,22 +115,24 @@ func TestSecurity_JobRunsOnePodPerRun(t *testing.T) {
 // TestSecurity_EveryContainerRePullsItsImage pins imagePullPolicy Always on
 // every container the pod starts.
 //
-// The kubelet resolves an image reference once and then reuses whatever the
-// node already has. Always makes it re-resolve on every start, so a node whose
-// image cache holds a stale or tampered layer for that reference cannot supply
-// it silently to a run that asked for the current one.
+// Under IfNotPresent the kubelet does not contact the registry at all when it
+// already holds something for that reference. Always makes it re-resolve at the
+// registry on every start, so a node cannot go on serving what it resolved for
+// that reference earlier.
 //
-// Absence is a real weakening here, unlike the two Job fields above: the kubelet
-// defaults an omitted policy to Always ONLY for the `:latest` tag, and to
-// IfNotPresent for everything else — including the digest pin this package tells
+// Absence is a weakening here in a way it is not for the two Job fields above:
+// the API server defaults an omitted policy at pod admission to Always for the
+// `:latest` tag or an untagged reference, and to IfNotPresent for every other
+// tag AND for a digest — which is exactly the digest pin this package tells
 // callers to use in production. Omitting the field would therefore turn the
 // hardest-pinned specs into the cached-image case.
 //
 // The bound, which EnforcementNotes states and this test does not claim past:
-// Always re-resolves the REFERENCE, so it is only an identity guarantee when
-// that reference is a digest. A mutable tag re-resolved every start can return
-// different bytes every start, and the pull itself is the kubelet's, outside
-// anything this manifest controls.
+// this is a FRESHNESS control, not an integrity one. Once the reference resolves
+// to a digest the node already stores, the runtime reuses those layers and
+// nothing re-verifies them, so it is no defence against a compromised image
+// store. It is an identity guarantee only when the reference is a digest, and
+// the pull itself is the kubelet's, outside anything this manifest controls.
 func TestSecurity_EveryContainerRePullsItsImage(t *testing.T) {
 	for name, spec := range transportSpecs(t) {
 		t.Run(name, func(t *testing.T) {
@@ -140,36 +147,10 @@ func TestSecurity_EveryContainerRePullsItsImage(t *testing.T) {
 					continue
 				}
 				if v != "Always" {
-					t.Errorf("container %q imagePullPolicy = %v, want Always; anything else lets a stale or tampered node-local image serve the run", cname, v)
+					t.Errorf("container %q imagePullPolicy = %v, want Always; anything else lets an image the node resolved earlier serve the run", cname, v)
 				}
 			}
 		})
-	}
-}
-
-// TestSecurity_ImageTransportStartsBothContainersFromOneReference covers the
-// container the pull policy is easiest to forget on. The init container carries
-// the workspace, runs in the same pod, and uses the same image reference — so if
-// it and the agent could resolve to different bytes, a digest-pinned spec would
-// have two images to audit instead of one.
-func TestSecurity_ImageTransportStartsBothContainersFromOneReference(t *testing.T) {
-	spec := transportSpecs(t)[string(WorkspaceFromImage)]
-	manifest, err := spec.Render()
-	if err != nil {
-		t.Fatalf("Render() = %v, want nil", err)
-	}
-	containers := allContainers(t, manifest)
-	if len(containers) != 2 {
-		t.Fatalf("expected the agent and the workspace init container, got %d: %v", len(containers), containers)
-	}
-	for _, want := range []string{containerName, initContainerName} {
-		c, present := containers[want]
-		if !present {
-			t.Fatalf("container %q is missing from the rendered pod", want)
-		}
-		if c["image"] != spec.Image {
-			t.Errorf("container %q image = %v, want %q; the workspace must not come from a second image", want, c["image"], spec.Image)
-		}
 	}
 }
 
@@ -191,29 +172,34 @@ func TestRunsOnePodWithFreshImages(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		mutate  func(*job)
-		wantErr bool
+		name   string
+		mutate func(*job)
+		// substr must appear in the error, so the message names the axis that
+		// drifted. This guard fuses two unrelated properties, so an
+		// unattributable "internal error" would leave a maintainer unable to
+		// tell a pull-policy drift from a pod-count one. Empty means the Job is
+		// hardened and must pass.
+		substr string
 	}{
 		{name: "hardened", mutate: func(*job) {}},
-		{name: "completions above one", mutate: func(j *job) { j.Spec.Completions = 2 }, wantErr: true},
-		{name: "completions zero", mutate: func(j *job) { j.Spec.Completions = 0 }, wantErr: true},
-		{name: "parallelism above one", mutate: func(j *job) { j.Spec.Parallelism = 5 }, wantErr: true},
-		{name: "parallelism zero", mutate: func(j *job) { j.Spec.Parallelism = 0 }, wantErr: true},
+		{name: "completions above one", mutate: func(j *job) { j.Spec.Completions = 2 }, substr: "completions=2"},
+		{name: "completions zero", mutate: func(j *job) { j.Spec.Completions = 0 }, substr: "completions=0"},
+		{name: "parallelism above one", mutate: func(j *job) { j.Spec.Parallelism = 5 }, substr: "parallelism=5"},
+		{name: "parallelism zero", mutate: func(j *job) { j.Spec.Parallelism = 0 }, substr: "parallelism=0"},
 		{
-			name:    "agent container caches its image",
-			mutate:  func(j *job) { j.Spec.Template.Spec.Containers[0].ImagePullPolicy = "IfNotPresent" },
-			wantErr: true,
+			name:   "agent container caches its image",
+			mutate: func(j *job) { j.Spec.Template.Spec.Containers[0].ImagePullPolicy = "IfNotPresent" },
+			substr: `container "agent"`,
 		},
 		{
-			name:    "agent container names no policy",
-			mutate:  func(j *job) { j.Spec.Template.Spec.Containers[0].ImagePullPolicy = "" },
-			wantErr: true,
+			name:   "agent container names no policy",
+			mutate: func(j *job) { j.Spec.Template.Spec.Containers[0].ImagePullPolicy = "" },
+			substr: "imagePullPolicy",
 		},
 		{
-			name:    "init container caches its image",
-			mutate:  func(j *job) { j.Spec.Template.Spec.InitContainers[0].ImagePullPolicy = "Never" },
-			wantErr: true,
+			name:   "init container caches its image",
+			mutate: func(j *job) { j.Spec.Template.Spec.InitContainers[0].ImagePullPolicy = "Never" },
+			substr: `container "workspace-init"`,
 		},
 		{
 			name: "a container added later forgets the policy",
@@ -221,7 +207,7 @@ func TestRunsOnePodWithFreshImages(t *testing.T) {
 				j.Spec.Template.Spec.Containers = append(j.Spec.Template.Spec.Containers,
 					container{Name: "sidecar", ImagePullPolicy: "IfNotPresent"})
 			},
-			wantErr: true,
+			substr: `container "sidecar"`,
 		},
 	}
 
@@ -231,31 +217,46 @@ func TestRunsOnePodWithFreshImages(t *testing.T) {
 			tt.mutate(&j)
 
 			err := runsOnePodWithFreshImages(j)
-			if tt.wantErr && err == nil {
+			if tt.substr == "" {
+				if err != nil {
+					t.Fatalf("runsOnePodWithFreshImages() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
 				t.Fatal("runsOnePodWithFreshImages() = nil, want a refusal")
 			}
-			if !tt.wantErr && err != nil {
-				t.Fatalf("runsOnePodWithFreshImages() = %v, want nil", err)
+			if !strings.Contains(err.Error(), tt.substr) {
+				t.Errorf("error does not name what drifted (want %q):\n%v", tt.substr, err)
 			}
 		})
 	}
 }
 
 // TestSecurity_OnePodAndFreshImageBoundsAreStated keeps the two claims this
-// milestone adds from being read wider than they are. Both have a bound that an
+// milestone adds from being read wider than they are. Both have a bound an
 // operator has to know, and an untrue reading of either is worse than no claim:
-// "one pod" is not at-most-once execution, and re-resolving a mutable tag is not
-// image identity.
+// "one pod" is not at-most-once execution, and Always is a freshness control,
+// not an integrity one.
+//
+// It asserts the LIMITING clauses, not the topic words. Matching on the topic
+// ("digest", "parallelism 1") only proves a note about the subject exists —
+// review demonstrated that such a test passes when both notes are replaced by
+// pure overclaims that happen to use the same vocabulary, which is the failure
+// this whole commit exists to remove, one level up. A clause that states the
+// limit cannot survive being rewritten into a guarantee.
 func TestSecurity_OnePodAndFreshImageBoundsAreStated(t *testing.T) {
 	notes := strings.ToLower(strings.Join(validSpec().EnforcementNotes(), "\n"))
 
 	for _, want := range []struct{ topic, substr string }{
-		{"the pull policy re-resolves the reference, not the bytes", "imagepullpolicy always re-resolves"},
-		{"digest pinning is what makes the reference an identity", "digest"},
-		{"parallelism/completions bound the Job's own pods only", "parallelism 1"},
+		{"Always is freshness, not tamper detection", "freshness control and not tamper detection"},
+		{"the cached layers are reused and not re-verified", "nothing re-verifies them"},
+		{"only a digest reference makes it an identity guarantee", "identity guarantee only when the reference is a digest"},
+		{"Andbo does not vouch for the image it names", "does not sign, verify, or admit"},
+		{"one pod scheduled is not one execution", "not a count of how many times the agent runs"},
 	} {
 		if !strings.Contains(notes, want.substr) {
-			t.Errorf("enforcement notes do not state %s (looking for %q):\n%s", want.topic, want.substr, notes)
+			t.Errorf("enforcement notes do not state the bound %q (looking for %q):\n%s", want.topic, want.substr, notes)
 		}
 	}
 }

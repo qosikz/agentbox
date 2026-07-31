@@ -125,11 +125,17 @@ func assertHardened(t *testing.T, manifest string) {
 	}
 }
 
-// assertContainersRePull is the ABSENCE half of the imagePullPolicy invariant,
-// which mustEqual cannot cover: that list compares keys that were rendered, and
-// an omitted policy renders no key at all. Omission is not a neutral outcome —
-// the kubelet then defaults to IfNotPresent for every reference but the :latest
-// tag — so every container the pod starts has to name the policy.
+// assertContainersRePull is the ABSENCE half of the imagePullPolicy invariant.
+// mustEqual only compares keys that were rendered, so it cannot speak for a
+// policy that is not in the manifest at all.
+//
+// No input reaches that state today: the field carries no omitempty, so an
+// empty policy still renders as `imagePullPolicy: ""` and mustEqual catches it.
+// This guards the drift that would change that — adding omitempty, or dropping
+// the field — which is the same class of silent weakening the rest of this
+// commit exists to close. Omission is not neutral: the API server then defaults
+// the policy at pod admission to IfNotPresent for every reference but the
+// :latest tag and the untagged form.
 func assertContainersRePull(t *testing.T, manifest string) {
 	t.Helper()
 

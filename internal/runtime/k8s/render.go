@@ -350,42 +350,42 @@ func bindsPolicyToPod(np networkPolicy, j job) error {
 // runsOnePodWithFreshImages reports whether the rendered Job would start exactly
 // one pod attempt, and whether every container it starts re-resolves its image.
 //
-// Two properties, one guard, because they share a failure mode: both are
-// constants of this contract that render sets inline, both are invisible in a
-// manifest that otherwise reads as correct, and neither is caught by validation
-// — JobSpec has no field for either, so there is nothing at the boundary to
-// check.
+// Two properties, one guard: both are constants render sets inline, both are
+// invisible in a manifest that otherwise reads as correct, and neither is caught
+// by Validate — JobSpec has no field for either.
 //
-//   - completions and parallelism above 1 turn one requested run into several
-//     concurrent agents. Every side effect the run has outside the pod — a
-//     commit, a push, a pull request, a tool call — happens once per pod, from
-//     pods racing each other on the same repository with the same credentials.
-//     Below 1 is the other direction of the same drift: parallelism 0 suspends
-//     the Job, so the manifest applies cleanly and the agent never runs.
-//   - imagePullPolicy anything but Always lets the kubelet serve whatever the
-//     node's cache already holds for that reference. An empty value is the same
-//     outcome by omission: the kubelet's default is Always only for the :latest
-//     tag and IfNotPresent for everything else, which is every digest-pinned
-//     spec this package tells callers to prefer.
+//   - completions above 1 runs the agent that many times over, parallelism above
+//     1 lets those repeats race, and every side effect outside the pod (commit,
+//     push, PR, tool call) then happens once per pod on the same repository with
+//     the same credentials. The two are not interchangeable: a fixed-completion
+//     Job never runs more pods than it has completions left, so parallelism
+//     above 1 with completions 1 adds no pod — still refused, because a manifest
+//     has to mean what it says. Below 1 is the same drift inverted: parallelism
+//     0 leaves the Job paused until someone raises it, completions 0 marks it
+//     Complete at once, and either way the agent never runs.
+//   - imagePullPolicy anything but Always lets the kubelet serve whatever its
+//     node already holds for that reference. Empty is not neutral: the API
+//     SERVER defaults an omitted policy at pod admission — Always for :latest or
+//     an untagged reference, IfNotPresent for every other tag AND for a digest,
+//     which is every digest-pinned spec this package tells callers to prefer.
+//     (No kubelet default exists; an empty policy reaching one just does not
+//     pull.)
 //
-// It reads the CONSTRUCTED Job rather than the values that fed it, so this
-// covers containers that do not exist yet: adding a sidecar or a second init
-// container without a pull policy fails the render instead of shipping a
-// container that quietly runs an older image.
+// It reads the CONSTRUCTED Job, not the values that fed it, so it covers
+// containers that do not exist yet: a sidecar added later without a pull policy
+// fails the render rather than quietly running an older image.
 //
-// The bound is the same one bindsPolicyToPod carries: no test can prove this
-// function was CALLED, because deleting the call site changes no output while
-// render is correct. What is testable is the property itself, which
-// TestSecurity_JobRunsOnePodPerRun and
-// TestSecurity_EveryContainerRePullsItsImage pin on the rendered manifest,
-// guard or no guard.
+// Same bound as bindsPolicyToPod: no test can prove this was CALLED, since
+// deleting the call site changes no output while render is correct. The
+// properties themselves are pinned on the rendered manifest by
+// TestSecurity_JobRunsOnePodPerRun and TestSecurity_EveryContainerRePullsItsImage.
 func runsOnePodWithFreshImages(j job) error {
 	if j.Spec.Completions != 1 || j.Spec.Parallelism != 1 {
-		return fmt.Errorf("internal error: Job %q renders completions=%d parallelism=%d, and an agent run must be exactly one pod: above 1 the Job starts concurrent agents that each repeat the run's commits, pushes, and tool calls, and below 1 it starts none; refusing to render it", j.Metadata.Name, j.Spec.Completions, j.Spec.Parallelism)
+		return fmt.Errorf("internal error: Job %q renders completions=%d parallelism=%d, and an agent run must be exactly one pod: completions above 1 runs the agent that many times over — concurrently, up to parallelism — repeating the run's commits, pushes, and tool calls per pod, while 0 on either field means it never runs at all; refusing to render it", j.Metadata.Name, j.Spec.Completions, j.Spec.Parallelism)
 	}
 	for _, c := range append(append([]container{}, j.Spec.Template.Spec.InitContainers...), j.Spec.Template.Spec.Containers...) {
 		if c.ImagePullPolicy != "Always" {
-			return fmt.Errorf("internal error: container %q in Job %q renders imagePullPolicy %q, want \"Always\": the kubelet would then serve whatever image its node has cached for %q — and an empty policy is the same outcome, since the kubelet defaults to IfNotPresent for every reference except the :latest tag; refusing to render a run that could start from a stale or tampered image", c.Name, j.Metadata.Name, c.ImagePullPolicy, c.Image)
+			return fmt.Errorf("internal error: container %q in Job %q renders imagePullPolicy %q, want \"Always\": the kubelet would then serve whatever image its node has already cached for %q — and an empty policy is not neutral, since the API server defaults one at pod admission to IfNotPresent for every reference but the :latest tag and the untagged form; refusing to render a run that could start from an image the node resolved earlier", c.Name, j.Metadata.Name, c.ImagePullPolicy, c.Image)
 		}
 	}
 	return nil
