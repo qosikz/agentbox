@@ -38,7 +38,7 @@ import "fmt"
 // the API server, so they cost a run that never starts rather than one that
 // never stops. Refusing them here is what makes the message name the field.
 //
-// Three bounds, all real:
+// Four bounds, all real:
 //
 //   - It reaches Spec.ActiveDeadlineSeconds and nothing else. Fields that extend
 //     or reset the same clock are out of reach by ABSENCE FROM THE STRUCTS
@@ -50,12 +50,11 @@ import "fmt"
 //     is where the deadline is measured from; spec.managedBy hands
 //     reconciliation to a controller outside the cluster's own, and syncJob then
 //     returns early for that Job, after which nothing enforces this field at
-//     all. This guard cannot be fixed to see any of them
-//     — it reads named Go struct fields, so a field that is not in the struct
-//     cannot be read, and the moment one is added the guard goes on passing.
-//     Only a walk over the encoded manifest can say "and nothing else", which is
-//     what TestSecurity_NoOtherFieldCanExtendTheRunsWallClock does at both
-//     levels.
+//     all. This guard cannot be fixed to see any of them — it reads named Go
+//     struct fields, so a field that is not in the struct cannot be read, and
+//     the moment one is added the guard goes on passing. Only a walk over the
+//     encoded manifest can say "and nothing else", which is what
+//     TestSecurity_NoOtherFieldCanExtendTheRunsWallClock does at both levels.
 //   - It cannot see ABSENCE. ActiveDeadlineSeconds is a non-pointer int64, so a
 //     field dropped from the YAML still reads as 0 here — refused, but for the
 //     wrong reason, and a pointer field made omitempty would render nothing and
@@ -76,7 +75,7 @@ import "fmt"
 func boundsTheRunsWallClock(j job) error {
 	switch d := j.Spec.ActiveDeadlineSeconds; {
 	case d <= 0:
-		return fmt.Errorf("internal error: Job %q renders activeDeadlineSeconds=%d, want 1..%d: a zero budget is not the absence of a deadline but a deadline already spent — the Job controller finds the run past it on first sight and terminates it before the agent does anything — and a negative one is rejected outright by the API server, so the run never starts; refusing to render a manifest whose stated budget cannot be spent", j.Metadata.Name, d, MaxActiveDeadlineSeconds)
+		return fmt.Errorf("internal error: Job %q renders activeDeadlineSeconds=%d, want 1..%d: a zero budget is not the absence of a deadline but a deadline already spent — the Job controller compares elapsed time against it with >=, so the run is past its deadline the first time the deadline is evaluated and the Job is failed rather than performed — and a negative one is rejected outright by the API server, so the run never starts; refusing to render a manifest whose stated budget cannot be spent", j.Metadata.Name, d, MaxActiveDeadlineSeconds)
 	case d > MaxActiveDeadlineSeconds:
 		return fmt.Errorf("internal error: Job %q renders activeDeadlineSeconds=%d, which exceeds the %d-second cap this package renders: nothing in Andbo supervises a pod, so a budget past the cap is a run holding cluster capacity for a day or more with no local timer to end it; lower budget.max_runtime_minutes, or raise MaxActiveDeadlineSeconds deliberately", j.Metadata.Name, d, MaxActiveDeadlineSeconds)
 	}
