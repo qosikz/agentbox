@@ -48,11 +48,26 @@ var (
 	// rather than a caller input, so any other value is drift. Checked wherever
 	// they appear, for the same reason the lists above are: a weakened value
 	// must not be able to hide in a structure the top-level assertions do not
-	// walk into. Presence is checked separately (see assertContainersRePull) —
-	// this list can only speak for keys that were rendered.
+	// walk into.
+	//
+	// This list can only speak for keys that were RENDERED: a field that
+	// disappears passes it. For three of the four that is a weakening in
+	// itself, because the API server then supplies something else —
+	// backoffLimit 6, restartPolicy Always (which it then rejects outright for
+	// a Job template), and completions nil, since it defaults completions only
+	// when parallelism is unset too and this renderer always emits parallelism.
+	// parallelism is the exception: it defaults to 1, which is the pinned
+	// value, so its absence costs the contract that the manifest fully
+	// describes the run rather than the property itself. Presence is asserted
+	// by the named property tests in manifest_contract_test.go, not here. The
+	// container check below is the exception that does its own presence
+	// assertion inline, because it has to reach containers in lists that do not
+	// exist yet.
 	mustEqual = map[string]any{
-		"parallelism": 1,
-		"completions": 1,
+		"parallelism":   1,
+		"completions":   1,
+		"backoffLimit":  0,
+		"restartPolicy": "Never",
 	}
 )
 

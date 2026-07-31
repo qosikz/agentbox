@@ -235,6 +235,251 @@ func TestRunsOnePodWithFreshImages(t *testing.T) {
 	}
 }
 
+// TestSecurity_NeitherControllerNorKubeletRetriesTheAgent pins the two fields
+// that together decide whether a failed agent run is repeated.
+//
+// They are one control on two axes, and each is useless alone:
+//
+//   - spec.backoffLimit bounds how many replacement PODS the Job controller
+//     creates after a pod fails. Absence is a weakening, not a neutral: the API
+//     server defaults it to 6, so a dropped field is six more runs.
+//   - spec.template.spec.restartPolicy decides whether the KUBELET restarts the
+//     failed CONTAINER in place — same pod, same volumes, same workspace. This
+//     is NOT a way round backoffLimit: the Job controller counts in-place
+//     restarts too, and at backoffLimit 0 the first one fails the Job. It is a
+//     matter of ordering. The kubelet restarts immediately and the controller
+//     reacts afterwards, so under OnFailure the agent gets one further start on
+//     the half-written workspace of the failed one before the Job is failed and
+//     the pod (and its logs) destroyed. One extra start, not an unbounded
+//     number — and one is enough for a second commit or push. Absence is worse
+//     than a wrong value, because the pod default is Always, which the API
+//     server rejects outright for a Job template — the run then never starts.
+//
+// Both are asserted PRESENT as well as equal, for those two reasons and for the
+// same contract reason as completions and parallelism above: a reviewer should
+// not have to know an API default to know whether a manifest re-runs an agent
+// that has already pushed a commit.
+func TestSecurity_NeitherControllerNorKubeletRetriesTheAgent(t *testing.T) {
+	for name, spec := range transportSpecs(t) {
+		t.Run(name, func(t *testing.T) {
+			manifest, err := spec.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil", err)
+			}
+			job := docs(t, manifest)[1]
+
+			jobSpec, ok := dig(t, job, "spec").(map[string]any)
+			if !ok {
+				t.Fatal("job spec is not a mapping")
+			}
+			switch v, present := jobSpec["backoffLimit"]; {
+			case !present:
+				t.Error("spec.backoffLimit is not rendered; the API server then defaults it to 6, so a failed run is retried six more times with every side effect it already committed")
+			case v != 0:
+				t.Errorf("spec.backoffLimit = %v, want 0; above 0 the Job controller replaces a failed pod and repeats the run's commits, pushes, and tool calls", v)
+			}
+
+			pod, ok := dig(t, job, "spec", "template", "spec").(map[string]any)
+			if !ok {
+				t.Fatal("job spec.template.spec is not a mapping")
+			}
+			switch v, present := pod["restartPolicy"]; {
+			case !present:
+				t.Error("restartPolicy is not rendered; the pod default is Always, which the API server rejects for a Job template, so the run would never start")
+			case v != "Never":
+				t.Errorf("restartPolicy = %v, want Never; under OnFailure the kubelet restarts the agent container in place on the same half-written workspace, and it does so before the Job controller can fail the Job on that restart, so the agent gets one further start", v)
+			}
+		})
+	}
+}
+
+// TestSecurity_NoOtherFieldCanReinstateRetries closes the set, because pinning
+// two fields to the right value does not make a manifest no-retry: a THIRD
+// field can hand the retries back while both pinned values still read correctly.
+//
+// This is the same defect shape review already found in this package once, one
+// level up. The pull-policy guard enumerated the container lists it was written
+// against, so a container in a list that did not exist when it was written
+// passed the whole suite. retriesNothingAfterFailure enumerates the FIELDS it
+// was written against, and the guard cannot do better: it reads named Go struct
+// fields, and a field that is not in the struct cannot be read. Only a walk over
+// the ENCODED manifest can say "and nothing else", so that check lives here
+// rather than in the guard.
+//
+// The two axes, both real batch/v1 surface and both absent from the Go structs
+// today, so this test is about the next edit and not about today's output:
+//
+//   - Job.spec. podFailurePolicy is the sharp one: `action: Ignore` tells the
+//     Job controller NOT to count that failure against the backoff budget and
+//     to create a replacement pod anyway, which makes backoffLimit 0 inert
+//     while it still renders as 0. It is valid ONLY with restartPolicy Never,
+//     so it composes precisely with this manifest — the no-retry contract's own
+//     precondition is its precondition. The realistic way in is not malice: the
+//     upstream recipe for "do not let a preemption burn the retry budget" is
+//     verbatim `action: Ignore` on a DisruptionTarget condition, so a
+//     maintainer being KINDER to preempted runs would silently convert "never
+//     re-run" into "re-run without bound". managedBy is the other: it hands
+//     reconciliation to a controller outside the cluster's Job controller,
+//     after which every field asserted here is advisory. backoffLimitPerIndex
+//     and maxFailedIndexes need completionMode Indexed, which is equally
+//     outside the set.
+//   - Containers. Pod-level restartPolicy Never is not the whole restart story:
+//     a CONTAINER may carry its own restartPolicy (Always on an init container
+//     is the native-sidecar form), and the kubelet then restarts that container
+//     in place whatever the pod says. That is the exact mechanism
+//     retriesNothingAfterFailure describes and the exact one it cannot see.
+//     Asserting the key is ABSENT, rather than asserting a value, is what makes
+//     this hold for restartPolicyRules and whatever else lands on a container
+//     next.
+//
+// A legitimate future sidecar would fail this test. That is the intended cost:
+// it is a run the kubelet may restart, and it should not become renderable
+// without someone re-deciding the contract in this file.
+func TestSecurity_NoOtherFieldCanReinstateRetries(t *testing.T) {
+	// Exactly the fields jobSpec declares. Adding one here is the deliberate
+	// act this test exists to force.
+	allowed := map[string]bool{
+		"backoffLimit":            true,
+		"completions":             true,
+		"parallelism":             true,
+		"activeDeadlineSeconds":   true,
+		"ttlSecondsAfterFinished": true,
+		"template":                true,
+	}
+
+	for name, spec := range transportSpecs(t) {
+		t.Run(name, func(t *testing.T) {
+			manifest, err := spec.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil", err)
+			}
+
+			jobSpec, ok := dig(t, docs(t, manifest)[1], "spec").(map[string]any)
+			if !ok {
+				t.Fatal("job spec is not a mapping")
+			}
+			for field := range jobSpec {
+				if !allowed[field] {
+					t.Errorf("spec.%s is rendered and is not part of the no-retry contract; a Job field outside this set can hand back the retries backoffLimit 0 refuses (podFailurePolicy action Ignore does not count a failure against the budget and replaces the pod anyway; managedBy moves reconciliation off the Job controller entirely). Decide what it does to the contract, then add it to this set", field)
+				}
+			}
+
+			for cname, c := range allContainers(t, manifest) {
+				if v, present := c["restartPolicy"]; present {
+					t.Errorf("container %q declares restartPolicy %v; the kubelet honours a container's own restart policy whatever the pod's Never says, so this container is outside the no-retry contract the pod spec states", cname, v)
+				}
+			}
+		})
+	}
+}
+
+// TestRetriesNothingAfterFailure exercises the render-time guard directly, on
+// constructed Jobs the public API cannot produce. It is what makes the property
+// enforceable rather than merely asserted: a future edit that makes either field
+// caller-supplied fails the render instead of emitting a manifest that runs the
+// agent again.
+//
+// "Dropped" is deliberately not claimed for both fields. BackoffLimit is a
+// non-pointer int64, so a field that vanishes from the YAML (an added omitempty)
+// still reads as 0 here and passes — this guard cannot tell 0 from absent, and
+// only the presence branch of
+// TestSecurity_NeitherControllerNorKubeletRetriesTheAgent catches that. It IS
+// claimed for RestartPolicy, whose zero value is the empty string refused below.
+func TestRetriesNothingAfterFailure(t *testing.T) {
+	ok := func() job {
+		return job{Spec: jobSpec{
+			BackoffLimit: 0,
+			Template:     podTemplate{Spec: podSpec{RestartPolicy: "Never"}},
+		}}
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*job)
+		// substr must appear in the error. The guard fuses two fields owned by
+		// two different controllers, so an unattributable "internal error" would
+		// leave a maintainer unable to tell a Job-controller retry from a
+		// kubelet one. Empty means the Job is hardened and must pass.
+		substr string
+	}{
+		{name: "hardened", mutate: func(*job) {}},
+		{name: "one retry", mutate: func(j *job) { j.Spec.BackoffLimit = 1 }, substr: "backoffLimit=1"},
+		{name: "the api default", mutate: func(j *job) { j.Spec.BackoffLimit = 6 }, substr: "backoffLimit=6"},
+		{name: "negative retries", mutate: func(j *job) { j.Spec.BackoffLimit = -1 }, substr: "backoffLimit=-1"},
+		{
+			name:   "kubelet restarts the container in place",
+			mutate: func(j *job) { j.Spec.Template.Spec.RestartPolicy = "OnFailure" },
+			substr: `restartPolicy "OnFailure"`,
+		},
+		{
+			name:   "kubelet restarts it unconditionally",
+			mutate: func(j *job) { j.Spec.Template.Spec.RestartPolicy = "Always" },
+			substr: `restartPolicy "Always"`,
+		},
+		{
+			// The empty value must appear in the message, not just the field
+			// name: an operator reading "renders restartPolicy" with nothing
+			// after it cannot tell a dropped field from a mis-set one.
+			name:   "the field was dropped",
+			mutate: func(j *job) { j.Spec.Template.Spec.RestartPolicy = "" },
+			substr: `restartPolicy ""`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := ok()
+			tt.mutate(&j)
+
+			err := retriesNothingAfterFailure(j)
+			if tt.substr == "" {
+				if err != nil {
+					t.Fatalf("retriesNothingAfterFailure() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("retriesNothingAfterFailure() = nil, want a refusal")
+			}
+			if !strings.Contains(err.Error(), tt.substr) {
+				t.Errorf("error does not name what drifted (want %q):\n%v", tt.substr, err)
+			}
+		})
+	}
+}
+
+// TestSecurity_NoRetryBoundsAreStated keeps the no-retry claim from being read
+// as at-most-once execution, and keeps the two fields from being documented as
+// if either one carried the property on its own.
+//
+// It asserts the LIMITING clauses, not the topic words, for the reason spelled
+// out on TestSecurity_OnePodAndFreshImageBoundsAreStated: matching on
+// "backoffLimit" would pass against a note that says backoffLimit 0 guarantees
+// the agent runs at most once, which is the exact overclaim this test exists to
+// prevent.
+func TestSecurity_NoRetryBoundsAreStated(t *testing.T) {
+	notes := strings.ToLower(strings.Join(validSpec().EnforcementNotes(), "\n"))
+
+	for _, want := range []struct{ topic, substr string }{
+		{"the two fields are one control", "only correct together"},
+		// The bound that keeps the note from overstating its own case. An
+		// earlier draft of this note said an in-place restart never consumes
+		// backoffLimit and so ran the agent without bound; the Job controller
+		// in fact sums container restarts and fails the Job on the first one at
+		// backoffLimit 0, and review caught it against the upstream source. The
+		// real cost of OnFailure is one extra start, and a note that inflates
+		// it is as wrong as one that omits it — an operator who is told
+		// "unbounded" and later finds out otherwise stops trusting the rest of
+		// this list.
+		{"OnFailure costs one extra start, not unbounded retries", "one more start and not an unbounded number"},
+		{"no-retry is not at-most-once execution", "neither field is at-most-once execution"},
+	} {
+		if !strings.Contains(notes, want.substr) {
+			t.Errorf("enforcement notes do not state the bound %q (looking for %q):\n%s", want.topic, want.substr, notes)
+		}
+	}
+}
+
 // TestSecurity_OnePodAndFreshImageBoundsAreStated keeps the two claims this
 // milestone adds from being read wider than they are. Both have a bound an
 // operator has to know, and an untrue reading of either is worse than no claim:
