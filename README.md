@@ -557,10 +557,26 @@ the finalizer mechanism above that deletion counts as nothing: the Job takes a
 to that moment and creates a fresh pod. So a suspend/resume cycle hands the run a
 full new budget *and* starts the agent over — an unbounded extension, repeatable.
 The second way is simply more direct: `activeDeadlineSeconds` is **mutable on a
-live Job** — the update validation's immutability checks name `selector`,
-`completionMode`, `podFailurePolicy`, `backoffLimitPerIndex`, `managedBy` and
-`successPolicy`, and not this one — so the number can be raised without even
-restarting the agent. The budget in the manifest you reviewed is the budget at
+live Job** — the update validation's `ValidateImmutableField` calls name
+`selector`, `completionMode`, `podFailurePolicy`, `backoffLimitPerIndex`,
+`managedBy` and `successPolicy`, and not this one — so the number can be raised
+without even restarting the agent. Read that list as what it is: the immutable
+**spec fields**, and *not* everything the update path holds. `ValidateJobSpecUpdate`
+also calls `validatePodTemplateUpdate`, `validateCompletions` and
+`validateJobSchedulingUpdate`, which is why `restartPolicy` and `completions`
+above are held while this field is not — a reader who took the six names for the
+whole of it would conclude the pod template was unheld, and it is not. What that
+reader would get *wrong in the other direction* is worth the same sentence,
+because it lands on the operator described in this very paragraph: the template
+is immutable outright only while the Job is **not suspended**. Suspend it and
+`validatePodTemplateUpdate` copies the incoming `nodeSelector`, `tolerations`,
+node affinity, `schedulingGates` and — the ones that matter here — the template's
+**`labels` and `annotations`** onto the old object before the immutability check,
+so those become editable, as do container `resources`. Both gates for that
+(`MutableSchedulingDirectivesForSuspendedJobs`,
+`MutablePodResourcesForSuspendedJobs`) are Beta and on by default from 1.36.
+`restartPolicy`, `imagePullPolicy` and the container list are still held in every
+branch. The budget in the manifest you reviewed is the budget at
 apply time, not for the life of the run. And enforcement is entirely the
 cluster's: nothing in Andbo supervises a pod, so a Job reconciled by another
 controller through `managedBy` gets no deadline applied at all.

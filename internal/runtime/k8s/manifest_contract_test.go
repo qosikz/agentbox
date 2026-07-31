@@ -812,6 +812,58 @@ func TestSecurity_WallClockCapIsDocumentedAndTrue(t *testing.T) {
 	}
 }
 
+// TestSecurity_ReadmeSaysTheImmutableListIsPartial keeps a partial list from
+// being read as the list.
+//
+// Both documents name the same six fields, and only one of them carried the
+// qualifier. EnforcementNotes says the six are "the immutable SPEC FIELDS, not
+// everything the update path checks" — pinned below by
+// TestSecurity_WallClockBoundsAreStated — while the README's parallel sentence
+// said "the update validation's immutability checks name" them and stopped. That
+// is not a smaller version of the same claim, it is a different one: a
+// README-only reader concludes the pod template is editable on a live Job, which
+// is the opposite of what the paragraph three above it tells them about
+// `restartPolicy`. Verified against upstream: `ValidateJobSpecUpdate` calls
+// `ValidateImmutableField` on exactly those six, and separately calls
+// `validatePodTemplateUpdate`, `validateCompletions` and
+// `validateJobSchedulingUpdate`.
+//
+// The named HELPERS are what this asserts, not the shape of the sentence. A
+// rewrite is free to say it differently; what it may not do is drop the fact
+// that the six are one of several checks, and a helper name is the smallest
+// thing that cannot survive that drop. The six-name list is the anchor rather
+// than an assertion, so this fails loudly if the passage moves instead of
+// quietly passing on a README that no longer contains it.
+func TestSecurity_ReadmeSaysTheImmutableListIsPartial(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "README.md"))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	flat := strings.Join(strings.Fields(string(src)), " ")
+
+	const anchor = "`selector`, `completionMode`, `podFailurePolicy`, `backoffLimitPerIndex`, `managedBy` and `successPolicy`"
+	start := strings.Index(flat, anchor)
+	if start < 0 {
+		t.Fatalf("README no longer lists the six immutable Job spec fields; that list is what an operator reads to decide which parts of a reviewed manifest survive being applied, so it must be re-tied to its qualifier rather than left unchecked")
+	}
+
+	// The passage, not the whole file: a qualifier somewhere else in the README
+	// does not correct this sentence for the person reading this sentence.
+	rest := flat[start:]
+	if len(rest) > 700 {
+		rest = rest[:700]
+	}
+	for _, want := range []struct{ topic, substr string }{
+		{"the list is the immutable spec fields and not the whole update path", "not* everything the update path holds"},
+		{"the pod template is pinned by a separate call", "validatePodTemplateUpdate"},
+		{"completions is pinned by a separate call", "validateCompletions"},
+	} {
+		if !strings.Contains(rest, want.substr) {
+			t.Errorf("the README passage listing the six immutable spec fields does not state %s (looking for %q). Without it the six read as the whole of what the update path holds, and the pod template — which holds restartPolicy and imagePullPolicy — reads as editable on a live Job:\n%s", want.topic, want.substr, rest)
+		}
+	}
+}
+
 // TestSecurity_WallClockBoundsAreStated keeps the bounded-run claim from being
 // read as "the agent stops at the deadline", which is the reading an operator
 // will take from the field name alone and the one that decides whether they
@@ -913,20 +965,27 @@ func TestSecurity_WallClockBoundsAreStated(t *testing.T) {
 // the two catch different things — this one cannot see a key that appears
 // without a struct field behind it (a nested map, or a renamed tag), and that
 // walk cannot see a field that did not render.
+// It shares renderedKey with the metadata guard rather than parsing tags a
+// second time, and review is what established that this is not tidiness. Both
+// copies split the tag before testing it for "-", so both skipped a
+// `yaml:"-,omitempty"` field that yaml.v3 renders under the literal key "-" —
+// the two halves this package relies on to catch each other had one parsing bug
+// between them. One parser, pinned against the encoder itself by
+// TestRenderedKeyAgreesWithTheEncoder, is what stops that recurring.
+//
+// An inlined field is reported under its own name here even though the encoder
+// spreads its keys across the mapping. That is deliberate: no single declared
+// key describes it, so naming it makes assertClosed fail loudly rather than
+// letting the shape through unexamined.
 func declaredKeys(t *testing.T, typ reflect.Type) []string {
 	t.Helper()
 	var out []string
 	for i := range typ.NumField() {
-		f := typ.Field(i)
-		tag, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
-		switch tag {
-		case "-":
+		key, skipped, _ := renderedKey(typ.Field(i))
+		if skipped {
 			continue
-		case "":
-			// yaml.v3 lowercases the field name when no tag is given.
-			tag = strings.ToLower(f.Name)
 		}
-		out = append(out, tag)
+		out = append(out, key)
 	}
 	return out
 }
