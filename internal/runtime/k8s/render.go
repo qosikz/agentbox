@@ -69,6 +69,8 @@ type podSpec struct {
 	RestartPolicy                string             `yaml:"restartPolicy"`
 	AutomountServiceAccountToken bool               `yaml:"automountServiceAccountToken"`
 	EnableServiceLinks           bool               `yaml:"enableServiceLinks"`
+	DNSPolicy                    string             `yaml:"dnsPolicy"`
+	DNSConfig                    podDNSConfig       `yaml:"dnsConfig"`
 	HostNetwork                  bool               `yaml:"hostNetwork"`
 	HostPID                      bool               `yaml:"hostPID"`
 	HostIPC                      bool               `yaml:"hostIPC"`
@@ -78,6 +80,14 @@ type podSpec struct {
 	InitContainers               []container        `yaml:"initContainers,omitempty"`
 	Containers                   []container        `yaml:"containers"`
 	Volumes                      []volume           `yaml:"volumes"`
+}
+
+// podDNSConfig declares nameservers and nothing else. Searches and options are
+// absent by construction: a search list is how svc.cluster.local would come
+// back into a pod whose whole point is that it resolves nothing the cluster
+// runs, and neither field has a rendered form to set.
+type podDNSConfig struct {
+	Nameservers []string `yaml:"nameservers"`
 }
 
 type podSecurityContext struct {
@@ -214,8 +224,31 @@ func (s JobSpec) Render() (string, error) {
 				Spec: podSpec{
 					RestartPolicy:                "Never",
 					AutomountServiceAccountToken: false,
-					// No cluster service discovery injected into the agent's env.
+					// Drops the per-namespace Service variables. It does NOT
+					// empty the agent's view of the cluster: the kubelet
+					// injects KUBERNETES_SERVICE_HOST/_PORT for the
+					// default-namespace kubernetes Service whatever this says
+					// (see EnforcementNotes). Narrowing is still worth it.
 					EnableServiceLinks: false,
+					// The resolver is the other discovery route. The
+					// ClusterFirst default hands the pod the kube-dns ClusterIP
+					// as its nameserver and <ns>.svc.cluster.local,
+					// svc.cluster.local, and cluster.local as its search list.
+					// dnsPolicy None replaces both with what dnsConfig says,
+					// and dnsConfig says one loopback address — the pod's OWN
+					// loopback (it has its own netns), which reaches nothing.
+					// That reasoning depends on HostNetwork staying false: with
+					// host networking 127.0.0.1 is the NODE's loopback, where a
+					// node-local DNS cache commonly listens.
+					//
+					// The kubelet writes this from the pod spec, so it does not
+					// depend on the CNI. That is the whole of the claim, and it
+					// stops ACCIDENTAL resolution only: it does nothing against
+					// a process that picks its own resolver socket, which is
+					// what the allow-DNS-egress baseline in EnforcementNotes is
+					// about. The NetworkPolicy stays the enforcement.
+					DNSPolicy:          "None",
+					DNSConfig:          podDNSConfig{Nameservers: []string{"127.0.0.1"}},
 					HostNetwork:        false,
 					HostPID:            false,
 					HostIPC:            false,

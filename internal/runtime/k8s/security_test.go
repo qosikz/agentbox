@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"math"
+	"net"
 	"os"
 	"strings"
 	"testing"
@@ -404,6 +405,99 @@ func TestSecurity_ReservedNamespaceBoundIsDocumentedAndTrue(t *testing.T) {
 				t.Errorf("Job metadata.namespace = %v, want %q", got, ns)
 			}
 		})
+	}
+}
+
+// TestSecurity_ClusterServiceDiscoveryIsBoundedOnBothRoutes covers a gap in the
+// render contract. The manifest set enableServiceLinks: false while leaving
+// dnsPolicy at its ClusterFirst default, which hands the pod cluster discovery
+// through /etc/resolv.conf anyway: the kube-dns ClusterIP as its resolver, and
+// <ns>.svc.cluster.local, svc.cluster.local, cluster.local as its search list.
+// Narrowing one route and leaving the other wide open is not a bound.
+//
+// The two routes are asserted together, in one test, because that is the
+// property: either one alone re-opens what the other narrows.
+//
+// BOUNDED, not closed, and the difference is load-bearing on each route:
+//
+//   - Env: enableServiceLinks: false drops the per-namespace Service variables,
+//     but the kubelet injects KUBERNETES_SERVICE_HOST/_PORT for the
+//     default-namespace kubernetes Service regardless of it, so the API
+//     server's address is always in the agent's environment.
+//   - DNS: the kubelet writes the resolver from the pod spec, so this holds
+//     where note 2 (no NetworkPolicy support in the CNI) bites. It does NOT
+//     answer note 3's allow-DNS-egress baseline, because a process that picks
+//     its own resolver socket never reads resolv.conf.
+func TestSecurity_ClusterServiceDiscoveryIsBoundedOnBothRoutes(t *testing.T) {
+	manifest, err := validSpec().Render()
+	if err != nil {
+		t.Fatalf("Render() = %v, want nil", err)
+	}
+	pod := dig(t, docs(t, manifest)[1], "spec", "template", "spec").(map[string]any)
+
+	// Route 1: the environment. This narrows it to the default-namespace
+	// kubernetes Service, which the kubelet injects regardless; it does not
+	// close it. See the note asserted at the end of this test.
+	if v := pod["enableServiceLinks"]; v != false {
+		t.Errorf("enableServiceLinks = %v, want false: it injects every Service in the pod's namespace as environment variables", v)
+	}
+
+	// Route 2: the resolver. Nothing the cluster runs may appear in it.
+	if v := pod["dnsPolicy"]; v != "None" {
+		t.Errorf("dnsPolicy = %v, want None: ClusterFirst resolves through kube-dns, which also forwards upstream", v)
+	}
+	cfg, ok := pod["dnsConfig"].(map[string]any)
+	if !ok {
+		t.Fatalf("dnsConfig is not a mapping (got %v); dnsPolicy None is invalid without one", pod["dnsConfig"])
+	}
+	ns, ok := cfg["nameservers"].([]any)
+	if !ok || len(ns) == 0 {
+		t.Fatalf("dnsConfig.nameservers = %v, want exactly one loopback address", cfg["nameservers"])
+	}
+	// Loopback is the point: a pod has its own network namespace, so 127.0.0.1
+	// is unreachable from anywhere else and reaches nothing else itself. Any
+	// routable address here would be a resolver the agent could actually use.
+	for i, n := range ns {
+		addr, _ := n.(string)
+		ip := net.ParseIP(addr)
+		if ip == nil || !ip.IsLoopback() {
+			t.Errorf("dnsConfig.nameservers[%d] = %v, want a loopback address; a routable resolver is a live egress path", i, n)
+		}
+	}
+	// The loopback reasoning above holds only in the pod's own netns. Under
+	// hostNetwork, 127.0.0.1 is the NODE's loopback, where systemd-resolved or a
+	// node-local DNS cache commonly listens — so this test states its own
+	// precondition rather than relying on another test to hold it.
+	if v := pod["hostNetwork"]; v != false {
+		t.Errorf("hostNetwork = %v, want false: with host networking a loopback nameserver reaches the node's resolver", v)
+	}
+	if strings.Contains(manifest, "cluster.local") {
+		t.Errorf("manifest names a cluster search domain:\n%s", manifest)
+	}
+
+	// No overclaim, on either route. Substring presence alone is too weak a
+	// guard here: the note IS the security claim this change ships, so a rewrite
+	// that inverted it would keep every keyword. Assert the hedges that make it
+	// true, and the absence of the two claims that would make it false.
+	notes := strings.ToLower(strings.Join(validSpec().EnforcementNotes(), "\n"))
+	for _, want := range []struct{ topic, substr string }{
+		{"the resolver is named at all", "resolv.conf"},
+		{"it is a default, not a boundary", "not a boundary"},
+		{"the NetworkPolicy is still the enforcement", "networkpolicy remains what decides"},
+		{"it does not answer the allow-DNS-egress note", "does not address note 3"},
+		{"the API server address survives enableServiceLinks", "kubernetes_service_host"},
+	} {
+		if !strings.Contains(notes, want.substr) {
+			t.Errorf("enforcement notes do not state %s (looking for %q):\n%s", want.topic, want.substr, notes)
+		}
+	}
+	for _, forbidden := range []string{
+		"cannot reach any resolver",
+		"closes cluster service discovery",
+	} {
+		if strings.Contains(notes, forbidden) {
+			t.Errorf("enforcement notes claim %q, which neither the resolver nor enableServiceLinks actually delivers", forbidden)
+		}
 	}
 }
 

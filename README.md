@@ -445,7 +445,12 @@ read the workspace, so keep it private and never bake credentials into it.
 What the rendered Job guarantees: non-root with a numeric UID,
 `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, `privileged: false`,
 capabilities dropped to `ALL`, seccomp `RuntimeDefault`,
-`automountServiceAccountToken: false`, `enableServiceLinks: false`, no host
+`automountServiceAccountToken: false`, `enableServiceLinks: false`,
+`dnsPolicy: None` with a single loopback nameserver (the pod is handed neither
+the kube-dns resolver nor the `svc.cluster.local` search domains; the kubelet
+applies that, not the CNI, so it holds even where the `NetworkPolicy` does not
+— but it stops *accidental* resolution only, and is not a boundary: a process
+that picks its own resolver socket never reads `resolv.conf`), no host
 namespaces, no `hostPath` (size-limited `emptyDir` is the only volume source),
 required CPU/memory requests and limits, `HOME` pointed at the writable volume
 (the root filesystem is read-only), and a bounded `ttlSecondsAfterFinished` and

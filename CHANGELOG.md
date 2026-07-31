@@ -49,7 +49,11 @@ All notable changes to Andbo are documented here.
   future Andbo Kubernetes backend) to apply. Secure by construction: non-root,
   `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, capabilities
   dropped to `ALL`, seccomp `RuntimeDefault`,
-  `automountServiceAccountToken: false`, `enableServiceLinks: false`, no
+  `automountServiceAccountToken: false`, `enableServiceLinks: false`,
+  `dnsPolicy: None` with a single loopback nameserver (so the pod is handed
+  neither the kube-dns resolver nor the `svc.cluster.local` search domains —
+  applied by the kubelet, so it holds where the CNI does not implement
+  `NetworkPolicy`; it stops accidental resolution and is not a boundary), no
   privileged mode, no host namespaces, and size-limited `emptyDir` as the only
   volume source. Resources, `activeDeadlineSeconds`, and
   `ttlSecondsAfterFinished` are all required and bounded. `RuntimeClassName`
