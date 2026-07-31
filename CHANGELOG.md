@@ -78,6 +78,37 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **Kubernetes renderer: both manifest key-set closures were blind to any field
+  added with `omitempty`.** The closures walked the keys the FIXTURE rendered, so
+  a field left at its zero value by `validSpec()` was invisible to them — and
+  rendered normally for any caller who set it. Measured on the merged contract:
+  adding `ManagedBy` to the Job spec struct with `omitempty`, wired from a new
+  `JobSpec` field, took the **whole repository green with no golden
+  regeneration**, while a caller setting it rendered `managedBy:` beside a
+  correct `activeDeadlineSeconds:` — switching the Job to an external controller
+  and so disabling the deadline and `backoffLimit` together. That is the exact
+  field both closures name in their own messages as the thing they exist to
+  catch; the same hole was reproduced at pod level (`terminationGracePeriodSeconds`)
+  and container level (`lifecycle`). The crack was already written down and not
+  recognised — the pod-spec closure noted that three of its keys "render only when
+  set" without noticing that tolerance also admits fields nobody has thought of.
+  Both closures now read the manifest STRUCTS as well as the rendered keys, so a
+  field that exists is seen whatever any fixture does with it.
+- **Kubernetes renderer: the wall-clock note claimed a suspend/resume cycle hands
+  the run a fresh budget "each time", which is false for the manifest this package
+  emits.** The mechanism is real for a generic Job, but `backoffLimit: 0` makes
+  the first suspend of a RUNNING Job terminal: suspending deletes the pod,
+  `isPodFailed` counts a deleted pod as failed (the exemption needs
+  `podReplacementPolicy: Failed`, defaulted only alongside a `podFailurePolicy`
+  this renderer never emits), and `1 > 0` finishes the Job as
+  `BackoffLimitExceeded`. So a suspend does not pause an Andbo run, it kills it —
+  and lands it in the same state the no-retry note teaches operators to read as an
+  agent failure, which is the more useful fact and was stated nowhere. Two smaller
+  corrections alongside it: the grace period is a **ceiling**, not a duration (an
+  agent handling SIGTERM exits at once; a push that overruns is SIGKILLed
+  mid-flight, leaving a half-written push or an `index.lock`), and the list of
+  immutable fields is the immutable *spec fields* rather than everything the
+  update path checks — it also constrains the pod template.
 - **Kubernetes renderer: the wall-clock guard's two refusals could swap messages
   with the suite still green.** The guard's doc comment says the two ends of the
   range "fail differently and the messages must not be interchangeable", and

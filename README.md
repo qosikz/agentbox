@@ -488,23 +488,32 @@ the image, and the `NetworkPolicy` does not restrict the pull.
 Finally, `activeDeadlineSeconds` is when the cluster **begins** ending the run,
 not when the agent stops. The Job controller deletes the pod through a call that
 carries no delete options at all, so it cannot ask for a shorter shutdown: the
-agent keeps running for the pod's `terminationGracePeriodSeconds` — 30 seconds,
-the default, since Andbo sets none — between SIGTERM and SIGKILL, which is long
-enough for a commit or push already under way to finish. The Job is then left in
-`DeadlineExceeded` with its pod and logs deleted, so that state is **not**
-evidence the agent did nothing: check the repository, not the Job. The budget
-measures one continuously-active period rather than the Job's lifetime — it runs
-from `status.startTime`, is not evaluated at all while the Job is suspended, and
-resets on resume, so anyone who can suspend and resume the Job hands the run a
-fresh full budget each time. The number is not settled by applying it either —
-`activeDeadlineSeconds` is **mutable on a live Job** (the update validation pins
-`selector`, `completionMode`, `podFailurePolicy`, `backoffLimitPerIndex`,
-`managedBy` and `successPolicy`, and not this one), so the same permission can
-simply raise it, and the budget in the manifest you reviewed is the budget at
-apply time rather than for the life of the run. And enforcement is entirely the
-cluster's: nothing
-in Andbo supervises a pod, so a Job reconciled by another controller through
-`managedBy` gets no deadline applied at all.
+agent keeps running for **up to** the pod's `terminationGracePeriodSeconds` — 30
+seconds, the default, since Andbo sets none — between SIGTERM and SIGKILL. That
+is a ceiling, not a duration: an agent that handles SIGTERM exits at once, one
+that ignores it burns the whole window. A commit or push already under way
+finishes only if it fits in what is left; one that does not is **killed
+mid-flight**, leaving a half-written push or a repository holding an
+`index.lock`. The Job is then left in `DeadlineExceeded` with its pod and logs
+deleted, so that state is **not** evidence the agent did nothing: check the
+repository, not the Job.
+
+Two things that look like ways to extend the budget, and are not.
+**Suspending a running Job ends it.** The suspend deletes the pod; the Job
+controller counts a deleted pod as a failure, and against `backoffLimit: 0` that
+one failure finishes the Job as `BackoffLimitExceeded` — permanently, since a
+finished Job is not resumed. So a suspend does not pause an Andbo run, it kills
+it, and leaves it in the state described above as an agent failure. (A Job
+created *suspended* that never ran a pod does get a full budget when resumed,
+but that is a delayed start, not an extension.) What **does** extend it is
+simpler: `activeDeadlineSeconds` is **mutable on a live Job** — the update
+validation pins `selector`, `completionMode`, `podFailurePolicy`,
+`backoffLimitPerIndex`, `managedBy` and `successPolicy`, and not this one — so
+anyone who could suspend the Job can instead just raise the number. The budget in
+the manifest you reviewed is the budget at apply time, not for the life of the
+run. And enforcement is entirely the cluster's: nothing in Andbo supervises a
+pod, so a Job reconciled by another controller through `managedBy` gets no
+deadline applied at all.
 
 Where it fails closed instead of downgrading — all of these exit **2**:
 `network.mode` `allowlist` and `open` are **rejected** (NetworkPolicy selects by
