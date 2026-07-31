@@ -91,17 +91,25 @@ All notable changes to Andbo are documented here.
   next distribution calls its system namespace, and the error states the
   additive-policy reason rather than only asserting the namespace is reserved
   (both the prefix and that reason are pinned by tests). It stays a prefix test:
-  `kube`, `kubeflow`, `kubernetes-dashboard`, and `andbo-kube-runs` still render,
-  and so does `default` — `andbo k8s render` warns about that one rather than
-  refusing it. Exit code is unchanged (`7`, invalid manifest).
+  `kube` and `andbo-kube-runs` still render, and so does `default` — `andbo k8s
+  render` warns about that one rather than refusing it. Exit code is unchanged
+  (`7`, invalid manifest).
 
   **What this does not cover:** only the prefix Kubernetes itself reserves. The
-  system namespaces other projects and distributions pick for themselves —
-  `calico-system`, `tigera-operator`, `istio-system`, `openshift-*`,
-  `metallb-system` — still render, because the renderer has no way to know a
-  cluster put anything privileged in them. Enforcement note 3 remains the
-  standing answer: run agents in a dedicated namespace, and audit the namespaced
-  and cluster-scoped policy objects before applying.
+  names other projects and distributions pick for themselves — `kubeflow`,
+  `kubernetes-dashboard`, `calico-system`, `tigera-operator`, `istio-system`,
+  `metallb-system`, `openshift-monitoring` and the rest of `openshift-*` — still
+  render, because the renderer has no way to know a cluster put anything
+  privileged in them. `kubeflow` and `kubernetes-dashboard` are the two to watch:
+  each is `kube` followed by something that is not the hyphen, so each misses the
+  prefix by a single character and renders looking like a name the guard weighed
+  and cleared. Neither is, and rendering is not a verdict on any of the others
+  either. Those names are now pinned by a test in both directions: the bound has
+  to enumerate each one, and each one has to still render. The list is
+  illustrative, not exhaustive — no list could be, which is what makes it a
+  bound. Enforcement note 3 remains the standing answer: run agents in a
+  dedicated namespace, and audit the namespaced and cluster-scoped policy objects
+  before applying.
 - **An `agent.default` naming an adapter that does not exist was called valid by
   both gates and then killed the run.** `andbo policy check` printed
   `✓ Policy valid`, exit `0`, and `andbo doctor` reported `config: ✓ andbo.yaml

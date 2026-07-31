@@ -182,10 +182,12 @@ func TestK8sRenderRejectsIncompleteInvocations(t *testing.T) {
 		{"value on a boolean flag", okArgs("--json=false"), ExitGeneral, "flag --json takes no value"},
 		{"second positional", []string{"render", "t", "extra", "--name", "n", "--namespace", "ns", "--workspace", "empty"}, ExitGeneral, `unexpected argument: "extra"`},
 		{"reserved namespace", []string{"render", "t", "--name", "n", "--namespace", "kube-system", "--workspace", "empty"}, ExitInvalidConfig, "reserved for cluster control-plane"},
-		// The three namespaces the API reserves by name are not the whole set: an
-		// installer-added kube- namespace holds control-plane components too, and
-		// carries the broad allow-egress policy that would defeat this Job's
-		// default-deny.
+		// What Kubernetes reserves is the kube- PREFIX, not only the three
+		// namespaces it creates under it, so this case pins a name that no list
+		// of shipped namespaces would have caught. The reason the operator is
+		// given travels in the error text itself and is pinned at the guard, in
+		// internal/runtime/k8s; restating it here would only give it somewhere
+		// to drift.
 		{"kube-prefixed namespace", []string{"render", "t", "--name", "n", "--namespace", "kube-flannel", "--workspace", "empty"}, ExitInvalidConfig, "reserved for cluster control-plane"},
 		{"name is not a DNS label", []string{"render", "t", "--name", "Fix_Tests", "--namespace", "ns", "--workspace", "empty"}, ExitInvalidConfig, "is not a DNS-1123 label"},
 	}
