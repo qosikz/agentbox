@@ -38,7 +38,7 @@ func (p podSpec) allContainers() []container {
 // appended to either list without a pull policy fails the render rather than
 // quietly running an older image.
 //
-// Two bounds, both real:
+// Three bounds, all real:
 //
 //   - It reaches the container lists podSpec.allContainers names, and nothing
 //     else. A container declared in a NEW list — ephemeralContainers, or
@@ -47,6 +47,23 @@ func (p podSpec) allContainers() []container {
 //     pull policy at all, passed the whole suite. The structural check in
 //     assertHardened is the backstop, because it matches any mapping that names
 //     an image rather than any list this file happens to know about.
+//   - The same apply-time bound the no-retry guard carries, with the answer
+//     coming out the other way, and it decides which half of this check is worth
+//     anything an hour into a run. completions is immutable on a live Job — but
+//     by a chain rather than by the field being special: the update path lets it
+//     move only for an Indexed Job, this Job is non-Indexed because no
+//     completionMode is emitted and the API server defaults an absent one to
+//     NonIndexed, and completionMode is itself immutable, so it cannot be
+//     switched afterwards. parallelism is freely mutable and merely INERT, since
+//     the controller wants completions-minus-successes pods and caps that by
+//     parallelism rather than the reverse. So the pod count is held by the
+//     completions half alone, and imagePullPolicy is held because it rides in
+//     the immutable pod template. A field that broke that chain would pass this
+//     guard while rendering correctly, which is why the Job-level key set is
+//     closed for THIS contract by TestSecurity_NoOtherFieldCanStartASecondPod
+//     rather than left to the closures the other two contracts own —
+//     completionMode passes both of those honestly. EnforcementNotes states the
+//     bound and TestSecurity_OnePodAndFreshImageBoundsAreStated pins the wording.
 //   - Same as bindsPolicyToPod: no test can prove this was CALLED, since
 //     deleting the call site changes no output while render is correct. The
 //     properties themselves are pinned on the rendered manifest by

@@ -485,6 +485,27 @@ different bytes each time. The pull itself is the kubelet's, from whatever
 registry and credentials the node has: Andbo neither signs, verifies, nor admits
 the image, and the `NetworkPolicy` does not restrict the pull.
 
+None of those values is settled by applying the manifest, and the answer differs
+field by field — which matters, because "I reviewed the manifest" is how they get
+trusted in the first place. The pod template is immutable while the Job is not
+suspended, so `restartPolicy: Never` and `imagePullPolicy: Always` cannot be
+changed on a live Job at all. `completions: 1` is held too, by a longer route:
+the update path lets `completions` move only for an `Indexed` Job, Andbo emits no
+`completionMode` so the API server stores `NonIndexed`, and `completionMode` is
+itself immutable — so this Job cannot become `Indexed` later. **`backoffLimit: 0`
+and `parallelism: 1` are neither**, and can be raised on a running Job by anyone
+who can update it. Raising `parallelism` buys no second pod while `completions`
+stays 1 — the controller asks for `completions` minus successes, and only then
+caps that by `parallelism` — so the one-pod bound rests on `completions` alone
+and the rendered `parallelism: 1` is intent the cluster is not enforcing. Raising
+`backoffLimit` is the one that bites: the controller compares the new value on
+its next sync, so the replacement pod the manifest refuses is one edit away for
+as long as the agent is running. Its only limit is the run's own end — a Job
+already carrying a `Failed` condition is skipped before the controller reads the
+spec, so raising it after a `BackoffLimitExceeded` restarts nothing. All of this
+concerns *this Job object*: deleting and re-applying is not an update, and
+neither is a second Job from the same manifest.
+
 Finally, `activeDeadlineSeconds` is when the cluster **begins** ending the run,
 not when the agent stops. The Job controller deletes the pod through a call that
 carries no delete options at all, so it cannot ask for a shorter shutdown: the

@@ -78,6 +78,38 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **Kubernetes renderer: the no-retry and one-pod contracts were stated as
+  properties of the run, and only some of them survive being applied.** The
+  wall-clock note already said `activeDeadlineSeconds` is mutable on a live Job;
+  the two notes beside it said nothing, so a reviewer reading a manifest was
+  entitled to assume all of it held for the life of the run. Verified verbatim
+  against upstream master rather than assumed, and the answer differs per field.
+  The pod template is immutable while the Job is not suspended, so
+  `restartPolicy: Never` and `imagePullPolicy: Always` are held. `completions: 1`
+  is held by a three-step chain — `validateCompletions` allows a change only for
+  an `Indexed` Job, this Job is `NonIndexed` because the renderer emits no
+  `completionMode` and `SetDefaults_Job` stores that default, and `completionMode`
+  is itself immutable. **`backoffLimit: 0` and `parallelism: 1` are held by
+  nothing**: raising `parallelism` buys no second pod only because the controller
+  caps wanted pods at `completions` minus successes, so the one-pod bound rests on
+  `completions` alone, and raising `backoffLimit` re-arms the replacement pod on
+  the controller's next sync for as long as the run is alive — bounded only by the
+  run's end, since a Job already `Failed` is skipped before the spec is read.
+- **Kubernetes renderer: the one-pod contract had no closed key set of its own,
+  and the two closures covering that struct ask other contracts' questions.** A
+  closure is a question put to whoever adds a field, and it defends only the
+  contract it names. Measured on the parent commit: adding `CompletionMode` to the
+  Job spec struct failed exactly the no-retry and wall-clock closures — and
+  `completionMode` reinstates no retry and moves no deadline, so a maintainer
+  answering both messages **honestly** adds it to both allowed sets, which took
+  the **whole repository green with no golden regeneration**. What that ships is
+  the single switch that unpins `completions` on a live Job, and under `Indexed`
+  it is mutable *only in tandem with `parallelism`* — concurrent agents on one
+  repository with one set of credentials, while the manifest still renders
+  `completions: 1` and `parallelism: 1` and the render-time guard still passes.
+  `TestSecurity_NoOtherFieldCanStartASecondPod` now asks the pod-count question at
+  Job level; the pod and container levels are deliberately not re-closed, for
+  reasons stated on the test.
 - **Kubernetes renderer: both manifest key-set closures were blind to any field
   added with `omitempty`.** The closures walked the keys the FIXTURE rendered, so
   a field left at its zero value by `validSpec()` was invisible to them — and
