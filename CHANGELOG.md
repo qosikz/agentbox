@@ -78,25 +78,16 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
-- **Kubernetes renderer: nothing enforced the no-retry contract at render time,
-  and the enforcement note described `backoffLimit: 0` as if `restartPolicy`
-  did not bear on it.** The rendered manifest is unchanged and always carried
-  both values; this hardens what holds them there and corrects what is claimed
-  about them. `backoffLimit` bounds replacement *pods* from the Job controller;
-  `restartPolicy` decides whether the kubelet restarts the *container* in
-  place. The kubelet acts first, so `OnFailure` lets the agent start a second
-  time on the half-written workspace of the first before the Job controller —
-  which does count that restart — fails the Job and destroys the pod's logs.
-  One extra start, not unbounded retries, and enough to commit or push twice.
-  Both values are now refused at render time, and asserted by name for presence
-  as well as value across every workspace transport (previously by one
-  assertion each, on one spec). Because a guard reading named struct fields
-  cannot see a field that does not exist yet, the rendered `Job.spec` key set
-  is now closed and no container may carry its own `restartPolicy`: a later
-  `podFailurePolicy` — whose `action: Ignore` genuinely does make
-  `backoffLimit: 0` inert, and which is valid only alongside
-  `restartPolicy: Never` — fails a test that names it, rather than only a
-  golden diff that `-update` would erase.
+- **Kubernetes renderer: nothing enforced the no-retry contract at render time.**
+  The rendered manifest is unchanged and always carried `backoffLimit: 0` with
+  `restartPolicy: Never`; this hardens what holds them there. Both are now
+  refused at render time and asserted by name across every workspace transport,
+  and the rendered `Job.spec` and container key sets are closed — because a
+  guard reading named struct fields cannot see a field that does not exist yet,
+  and `podFailurePolicy` (`action: Ignore`) would make `backoffLimit: 0` inert
+  while it still rendered as `0`. The enforcement note now states that the two
+  fields are one control, what `OnFailure` would actually cost, and that a
+  Failed Job with its logs deleted does not tell you whether the agent pushed.
 - **Kubernetes renderer: the reserved-namespace guard only knew the prefix
   Kubernetes reserves, so every namespace a privileged add-on owns rendered
   clean.** `--namespace cert-manager`, `kyverno`, `gatekeeper-system`,

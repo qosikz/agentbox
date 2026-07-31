@@ -464,15 +464,13 @@ a duration and stops the render as an invalid policy, rather than falling throug
 to that same default.) Rendering is deterministic, so the same inputs produce a
 byte-identical manifest you can diff and pin.
 
-Three of those need their limits read with them. `backoffLimit: 0` and
-`restartPolicy: Never` are one control and are only correct together:
-`backoffLimit` bounds how many replacement **pods** the Job controller makes,
-while `restartPolicy` decides whether the **kubelet** restarts the container in
-place. The kubelet acts first, so under `OnFailure` the agent starts a second
-time on the half-written workspace of the first before the Job controller —
-which does count that restart — fails the Job and destroys the pod's logs. That
-is one extra start rather than unbounded retries, and still enough to commit or
-push twice. `parallelism: 1` bounds what the
+Three of those need their limits read with them. `backoffLimit: 0` with
+`restartPolicy: Never` asks the cluster never to re-run a failed agent, and that
+is **not** at-most-once execution either — it stops the retries Andbo would ask
+for, not the ones the cluster causes. If a run does fail, the Job ends in
+`BackoffLimitExceeded` with its pod and logs already deleted, whether or not the
+agent got as far as committing: check the repository, not the Job. `parallelism:
+1` bounds what the
 **Job schedules** and is not at-most-once execution — the cluster can still start
 the same run twice (node failure, preemption, pod deletion), and nothing stops a
 second Job being applied from the same manifest, so agent side effects still have

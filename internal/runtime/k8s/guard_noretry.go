@@ -23,21 +23,27 @@ import "fmt"
 //     counts those restarts explicitly (pastBackoffLimitOnFailure sums
 //     RestartCount across the containers of pending and running pods, and with
 //     backoffLimit 0 returns true on the first one), then fails the Job with
-//     BackoffLimitExceeded. What backoffLimit cannot do is PREVENT the restart:
-//     the kubelet acts at once, the controller reacts afterwards off its watch,
-//     so the agent has already begun a second time on the half-written
-//     workspace of the first when the Job is failed and its pod terminated —
-//     which also destroys that pod's logs. OnFailure therefore buys the agent
+//     BackoffLimitExceeded. What backoffLimit cannot do is PREVENT the restart,
+//     and the reason is causal rather than a race the controller might win:
+//     RestartCount only increments once the restart has HAPPENED, and while the
+//     kubelet is sitting out its backoff the pod is Running rather than Failed,
+//     so neither counting path has anything to read. The controller gets its
+//     signal from the second start. By the time it fails the Job and terminates
+//     the pod — destroying that pod's logs — the agent has already begun again
+//     on the half-written workspace of the first attempt. OnFailure therefore buys the agent
 //     one more start, not an unbounded number, and Never buys it none. That
 //     bounded difference is still the whole reason an agent run must not use
 //     OnFailure: one extra start is enough to commit or push twice. Always is
 //     not a laxer setting but an invalid one — the API server rejects it for a
 //     Job template — which is also what an omitted restartPolicy becomes, since
 //     Always is the POD-level default; a drift there turns into a run that never
-//     starts rather than one that runs twice. (An INIT container may carry its
-//     own restartPolicy, where Always means a native sidecar. That is a
-//     different field, one level down, which this guard does not reach — see
-//     below.)
+//     starts rather than one that runs twice. (A CONTAINER may carry its own
+//     restartPolicy — on an init container, where Always is the native-sidecar
+//     form, and on a regular container under the newer container-restart rules.
+//     That is a different field one level down which this guard does not reach,
+//     and it is the worse case rather than a lesser one: the counting above is
+//     gated on the POD-level policy, so a container-level restart under Never is
+//     never counted at all. See below.)
 //
 // It reads the CONSTRUCTED Job, not the values that fed it, for the same reason
 // as the other guards: a future edit that makes either field caller-supplied
@@ -55,15 +61,23 @@ import "fmt"
 //     as 0 — and it is valid only alongside restartPolicy Never, so it composes
 //     exactly with this manifest. spec.managedBy moves reconciliation off the
 //     Job controller entirely, after which every value pinned here is advisory.
-//     A container's OWN restartPolicy is the same story one level down. This
-//     guard cannot be fixed to see any of them: it reads named Go struct
-//     fields, so a field that is not in the struct cannot be read, and the
-//     moment one is added the guard goes on passing. Only a walk over the
+//     A container's own restartPolicy is the same story one level down, and is
+//     the only axis here that is genuinely unbounded: pastBackoffLimitOnFailure
+//     opens by returning false unless the POD-level policy is OnFailure, so a
+//     container the kubelet restarts under pod-level Never is counted by
+//     nothing. This guard cannot be fixed to see any of them: it reads named Go
+//     struct fields, so a field that is not in the struct cannot be read, and
+//     the moment one is added the guard goes on passing. Only a walk over the
 //     encoded manifest can say "and nothing else", which is what
-//     TestSecurity_NoOtherFieldCanReinstateRetries does. Review found this
-//     exactly, on both axes: adding podFailurePolicy failed only the three
-//     golden diffs, and regenerating the goldens took the whole repository
-//     green on a manifest that re-runs the agent without bound.
+//     TestSecurity_NoOtherFieldCanReinstateRetries does. Review demonstrated the
+//     hole on the podFailurePolicy axis: adding one failed only the three golden
+//     diffs, and regenerating the goldens took the whole repository green on a
+//     manifest that re-runs the agent without bound. The container axis was NOT
+//     in that state — mustEqual already rejected a container-level Always at any
+//     depth, and no regeneration could absorb it. The container check earns its
+//     place by asserting the key is ABSENT rather than that its value is Never,
+//     which is what covers restartPolicyRules and whatever else lands on a
+//     container next.
 //   - This is not at-most-once EXECUTION, and no field in this manifest can be.
 //     It refuses the retries Andbo would ask for; node failure, preemption, and
 //     pod deletion still start the same run a second time, and nothing stops the
