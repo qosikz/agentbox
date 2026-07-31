@@ -11,7 +11,13 @@ All notable changes to Andbo are documented here.
   in. A new render-time guard (`runsOnlyTheAgent`) refuses anything else, and it
   derives the permitted set from the **workspace transport** rather than from a
   constant, because the transport is the only opt-in input that legitimately adds
-  a container.
+  a container. Both containers are checked by name **and** by argv: review found
+  the first draft authorising the init slot and then reading only its nameplate,
+  which let a shell-form init container through (`sh -c "cp …; curl … | sh"`)
+  with no golden regeneration needed, since no golden fixture pairs the image
+  transport with an opt-in field. For the agent, argv means `Command` **and**
+  `Args` — the rendered argv is the two concatenated, so comparing only `Command`
+  left an appended flag costing exactly one golden regeneration.
 
   The count was pinned only *incidentally* before this: three assertions in the
   repository fataled on it, and every one did so as a precondition to reaching
@@ -37,11 +43,22 @@ All notable changes to Andbo are documented here.
   failed. An extra *init* container is not concurrent but runs before the agent on
   the same workspace volume, so it can rewrite the tree the agent then commits.
 
-  The apply-time half of this contract mostly holds, unlike the no-retry and
-  one-pod contracts beside it: both container lists ride in `spec.template`, which
-  every branch of the Job update path refuses to change, so nobody edits a
-  container into a live Job the way they can raise `backoffLimit` or drop
-  `parallelism` to 0. What no manifest can hold is the **pod**: an ephemeral
+  The apply-time half of this contract holds, unlike the no-retry and one-pod
+  contracts beside it — but not because the pod template is simply frozen, and
+  the imprecise version of that claim was caught in review. While a Job is
+  suspended the update path exempts container `resources` and the scheduling
+  directives, and the exempt set includes the template's **labels**, which is
+  what this manifest's `NetworkPolicy` binds to. What refuses an added container
+  is narrower: `validatePodResourceUpdatesOnly` copies the new resources across
+  only when `len(newPod.Containers) == len(oldPodCopy.Containers)` and the names
+  line up index-for-index, then compares the whole pod spec for equality — so a
+  container list that grew, shrank, or was renamed fails in all three branches.
+  Live pods allow only `spec.containers[*].image` and
+  `spec.initContainers[*].image` to change. Container-list **membership** is
+  therefore genuinely held, and nobody edits a container into a live Job the way
+  they can raise `backoffLimit` or drop `parallelism` to 0.
+
+  What no manifest can hold is the **pod**: an ephemeral
   container is added through the pod's own `ephemeralcontainers` subresource
   rather than through the template (`kubectl debug` is the usual route), so it
   never meets that immutability at all, it shares the pod's network namespace,

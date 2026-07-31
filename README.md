@@ -495,9 +495,19 @@ update path ends in an immutability check on it, so neither can be changed on a
 live Job at all. `completions: 1` is held by a longer route — the update path
 lets `completions` move only for an `Indexed` Job, Andbo emits no
 `completionMode` so the API server stores `NonIndexed`, and `completionMode` is
-itself immutable, so this Job cannot become `Indexed` later. The **container
-lists** ride in that same pod template, so nobody edits a sidecar into a live
-Job — but that holds the *Job*, not the *pod*. An **ephemeral container** is
+itself immutable, so this Job cannot become `Indexed` later. **Container-list
+membership** is held too, and it is worth being exact about why, because the pod
+template is *not* simply frozen: while a Job is suspended the update path exempts
+container `resources` and the scheduling directives (including the template's
+**labels**, which is what this manifest's `NetworkPolicy` binds to). What refuses
+an added container is narrower and stronger — the resources exemption copies the
+new values across only when the container counts match *and* the names line up
+index-for-index, then compares the whole pod spec for equality, so a list that
+grew, shrank, or was renamed fails in every branch. Live pods are stricter still:
+only `spec.containers[*].image` and `spec.initContainers[*].image` may change.
+
+So nobody edits a sidecar into a live Job — but that holds the *Job*, not the
+*pod*. An **ephemeral container** is
 added through the pod's own `ephemeralcontainers` subresource rather than through
 the template (`kubectl debug` is the usual route), so it never meets that
 immutability at all: it attaches to the running pod, shares its network
