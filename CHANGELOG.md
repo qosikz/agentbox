@@ -74,6 +74,60 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **Kubernetes renderer: the reserved-namespace guard only knew the prefix
+  Kubernetes reserves, so every namespace a privileged add-on owns rendered
+  clean.** `--namespace cert-manager`, `kyverno`, `gatekeeper-system`,
+  `ingress-nginx`, `velero`, `cattle-system`, `istio-system`,
+  `openshift-monitoring` and the rest of the residual the previous fix
+  documented all produced an applyable manifest that put the agent in a
+  namespace owned by a project whose default install binds cluster-wide RBAC to
+  a service account living there — for several of them, cluster-wide access to
+  `Secrets`. The renderer's own enforcement notes name
+  another NetworkPolicy in that same namespace as the way this Job's
+  default-deny is silently defeated: policies are additive and cannot subtract
+  from one another, so a namespace belonging to such a component is the one
+  place the deny is least able to hold.
+
+  The guard now has two halves, and which half a name lands in is decided by
+  Kubernetes namespace semantics rather than by how the name looks:
+
+  - **Reserved prefixes**, for platforms that actually reserve a family:
+    `kube-` (documented as reserved) and `openshift-` (OpenShift refuses to
+    create a project under it). The tail does not matter, so
+    `openshift-anything` is refused the same way `kube-flannel` already was.
+  - **Exact names**, for everything else: `kubeflow`, `kubernetes-dashboard`,
+    `calico-system`, `tigera-operator`, `istio-system`, `metallb-system`,
+    `openshift`, `cattle-system`, `gatekeeper-system`, `kyverno`,
+    `cert-manager`, `ingress-nginx`, `velero`. These are **not** prefixes on
+    purpose. Namespace names are flat — `cert-manager-runs` has no relationship
+    to `cert-manager` — so a prefix test there would refuse namespaces an
+    operator may legitimately dedicate to agent runs, and a renderer that
+    refuses the safe case teaches operators to work around it. `cert-manager-runs`,
+    `velero-agent-runs`, `kyverno-agent`, `kube`, `andbo-kube-runs`,
+    `andbo-runs` and `default` all still render (tests pin each).
+
+  The error names the owning project and says why the name is refused — the
+  additive-policy reason, plus the reason that is true of *that* namespace —
+  rather than only asserting the namespace is taken. For most of the list that
+  is cluster-wide privilege. For `kubernetes-dashboard` and `openshift` it is
+  ownership alone: the Dashboard ships a namespaced `Role` and a metrics-only
+  `ClusterRole` (operators binding `cluster-admin` to it is a thing operators
+  do, not a thing it ships), and `openshift` is a content namespace of shared
+  imagestreams and templates with nothing of OpenShift's running in it. Both are
+  still refused, on the ground that holds. A test pins the split in both
+  directions, so the stronger reason cannot be asserted where it is not true.
+  Exit code is unchanged (`7`, invalid manifest).
+
+  **What this still does not cover:** any privileged project outside that list,
+  and the rest of a family only one member of which is named — `argocd`,
+  `flux-system`, `linkerd`, `vault`, `crossplane-system`, `rook-ceph`, and
+  Rancher's `cattle-*` beyond `cattle-system`, of which `cattle-fleet-system`
+  is the one to watch. Rancher does not reserve `cattle-` the way Kubernetes and
+  OpenShift reserve theirs, so it gets no prefix test. That residual is pinned
+  in both directions exactly as before: the guard's stated bound has to name
+  each one, and each one has to still render. Enforcement note 3 remains the
+  standing answer: run agents in a dedicated namespace, and audit the namespaced
+  and cluster-scoped policy objects before applying.
 - **Kubernetes renderer: the reserved-namespace guard listed three names, so the
   rest of the reserved prefix walked past it.** `kube-system`, `kube-public`, and
   `kube-node-lease` were refused by exact match, so `--namespace kube-flannel`
@@ -110,6 +164,13 @@ All notable changes to Andbo are documented here.
   bound. Enforcement note 3 remains the standing answer: run agents in a
   dedicated namespace, and audit the namespaced and cluster-scoped policy objects
   before applying.
+
+  **Superseded within this same unreleased cycle** by the entry above, but only
+  as to the "what this does not cover" list: those names are now refused,
+  `openshift-*` by prefix and the rest by exact name. Everything this entry
+  records as *rendering* — `kube`, `andbo-kube-runs`, `default` (still a warning,
+  not a refusal) and `andbo-runs` — still renders. What is left uncovered is
+  restated there.
 - **An `agent.default` naming an adapter that does not exist was called valid by
   both gates and then killed the run.** `andbo policy check` printed
   `✓ Policy valid`, exit `0`, and `andbo doctor` reported `config: ✓ andbo.yaml

@@ -189,6 +189,10 @@ func TestK8sRenderRejectsIncompleteInvocations(t *testing.T) {
 		// internal/runtime/k8s; restating it here would only give it somewhere
 		// to drift.
 		{"kube-prefixed namespace", []string{"render", "t", "--name", "n", "--namespace", "kube-flannel", "--workspace", "empty"}, ExitInvalidConfig, "reserved for cluster control-plane"},
+		// Not every namespace a privileged component owns sits under a reserved
+		// prefix. These are refused by exact name, and reach the operator through
+		// the same exit code as any other invalid manifest field.
+		{"privileged add-on namespace", []string{"render", "t", "--name", "n", "--namespace", "cert-manager", "--workspace", "empty"}, ExitInvalidConfig, "cluster-wide privilege"},
 		{"name is not a DNS label", []string{"render", "t", "--name", "Fix_Tests", "--namespace", "ns", "--workspace", "empty"}, ExitInvalidConfig, "is not a DNS-1123 label"},
 	}
 

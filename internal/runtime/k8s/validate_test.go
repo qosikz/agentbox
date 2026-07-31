@@ -97,6 +97,16 @@ func TestValidate_Rejects(t *testing.T) {
 			wantSub: "reserved",
 		},
 		{
+			name:    "openshift-prefixed namespace",
+			mutate:  func(s *JobSpec) { s.Namespace = "openshift-monitoring" },
+			wantSub: "reserved",
+		},
+		{
+			name:    "privileged add-on namespace",
+			mutate:  func(s *JobSpec) { s.Namespace = "cert-manager" },
+			wantSub: "privilege",
+		},
+		{
 			name:    "empty image",
 			mutate:  func(s *JobSpec) { s.Image = "" },
 			wantSub: "image",

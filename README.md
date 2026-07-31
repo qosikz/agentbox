@@ -430,7 +430,7 @@ Two things that example does **not** do, and that no flag can make it do:
 | Flag | Meaning |
 |---|---|
 | `--name` | Job name; also the label the `NetworkPolicy` selects on (DNS-1123 label) |
-| `--namespace` | An **existing** namespace dedicated to agent runs; Andbo does not create it, and refuses the `kube-` prefix Kubernetes reserves for system namespaces |
+| `--namespace` | An **existing** namespace dedicated to agent runs; Andbo does not create it. Refused: the `kube-` and `openshift-` prefixes those platforms reserve, and the exact names a privileged add-on conventionally owns (`cert-manager`, `kyverno`, `gatekeeper-system`, `ingress-nginx`, `velero`, `cattle-system`, `istio-system` and others — the full list, and what it does **not** cover, is in `internal/runtime/k8s/validate.go`) |
 | `--workspace empty` \| `image:/path` | How the workspace reaches the pod. Required — there is no default |
 | `--runtime-class`, `--service-account` | Optional; rendered only when given (token automount stays off) |
 | `--policy`, `--json` | As elsewhere |
