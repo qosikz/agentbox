@@ -78,6 +78,15 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **Kubernetes renderer: the wall-clock note named the elaborate way to defeat the
+  budget and not the obvious one.** The note said a suspend/resume cycle hands the
+  run a fresh budget, which is true, and left the impression that extending a run
+  takes a trick. It does not: `activeDeadlineSeconds` is absent from the immutable
+  list in `ValidateJobSpecUpdate` — which pins `selector`, `completionMode`,
+  `podFailurePolicy`, `backoffLimitPerIndex`, `managedBy` and `successPolicy` — so
+  the same permission that could suspend and resume the Job can instead raise the
+  number directly. The budget in a reviewed manifest is the budget at apply time,
+  not for the life of the run, and the note and README now say so.
 - **Kubernetes renderer: `activeDeadlineSeconds` was a value nothing checked once
   it had been rendered, and the level below it was closed by nothing.** The
   rendered manifest is unchanged and always carried a bounded deadline; this

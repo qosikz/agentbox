@@ -640,6 +640,15 @@ func TestSecurity_WallClockBoundsAreStated(t *testing.T) {
 		{"the grace period is added to every budget", "goes on running for the pod's terminationgraceperiodseconds"},
 		{"a Job that hit its deadline is not a Job that did nothing", "is not evidence that the agent did nothing"},
 		{"the budget is per active period, not per Job", "hands the run a fresh full budget each time"},
+		// The suspend/resume route was documented first and is the more
+		// interesting one, which is exactly why it must not stand alone: it
+		// reads as though defeating the budget takes a trick. It does not.
+		// activeDeadlineSeconds is absent from the immutable list in
+		// ValidateJobSpecUpdate, so the same permission simply raises the
+		// number, and a note that describes only the elaborate route
+		// understates who can extend a run to anyone reading it as a threat
+		// model.
+		{"the rendered budget is not fixed once applied", "mutable on a live job"},
 		{"nothing local enforces it", "nothing in andbo supervises a pod"},
 	} {
 		if !strings.Contains(notes, want.substr) {
