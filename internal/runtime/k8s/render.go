@@ -298,6 +298,9 @@ func (s JobSpec) Render() (string, error) {
 	if err := runsOnePodWithFreshImages(j); err != nil {
 		return "", err
 	}
+	if err := runsOnlyTheAgent(s, j); err != nil {
+		return "", err
+	}
 	if err := retriesNothingAfterFailure(j); err != nil {
 		return "", err
 	}

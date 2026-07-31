@@ -5,6 +5,67 @@ All notable changes to Andbo are documented here.
 ## Unreleased
 
 ### Added
+- **Kubernetes runner: the rendered Job is enforced to start exactly one agent
+  container.** The pod declares one agent container, plus — with
+  `--workspace image:/path` only — one init container that copies the workspace
+  in. A new render-time guard (`runsOnlyTheAgent`) refuses anything else, and it
+  derives the permitted set from the **workspace transport** rather than from a
+  constant, because the transport is the only opt-in input that legitimately adds
+  a container. Both containers are checked by name **and** by argv: review found
+  the first draft authorising the init slot and then reading only its nameplate,
+  which let a shell-form init container through (`sh -c "cp …; curl … | sh"`)
+  with no golden regeneration needed, since no golden fixture pairs the image
+  transport with an opt-in field. For the agent, argv means `Command` **and**
+  `Args` — the rendered argv is the two concatenated, so comparing only `Command`
+  left an appended flag costing exactly one golden regeneration.
+
+  The count was pinned only *incidentally* before this: three assertions in the
+  repository fataled on it, and every one did so as a precondition to reaching
+  `containers[0]` rather than as a property. That is weak in the direction that
+  matters, and it was demonstrated rather than argued — a sidecar gated behind
+  `ServiceAccountName` renders in no fixture that counts, so `make lint` and the
+  whole test suite went green with a second container sitting in
+  `full.golden.yaml` once the goldens were regenerated. The first draft of the
+  new test had the same hole for the same reason, so its fixtures now cross each
+  transport with **every optional JobSpec field set**: an opt-in field left at its
+  zero value cannot be seen to add anything.
+
+  Why a second container is a security problem and not a tidiness one, verified
+  against the kubelet's `getPhase` rather than assumed: `case running > 0 &&
+  unknown == 0: return v1.PodRunning` is evaluated *before* every terminal case,
+  so a container that does not exit holds the pod `Running` after the agent has
+  exited 0 — the Job never completes and burns its whole
+  `activeDeadlineSeconds`, ending `Failed/DeadlineExceeded` with the pod and its
+  logs deleted. The other direction is the terminal branch: the pod is
+  `PodSucceeded` only `if stopped == succeeded`, so a second container exiting
+  non-zero fails a run the agent completed. **Neither outcome names the extra
+  container anywhere in the Job's status**, so both read as the agent having
+  failed. An extra *init* container is not concurrent but runs before the agent on
+  the same workspace volume, so it can rewrite the tree the agent then commits.
+
+  The apply-time half of this contract holds, unlike the no-retry and one-pod
+  contracts beside it — but not because the pod template is simply frozen, and
+  the imprecise version of that claim was caught in review. While a Job is
+  suspended the update path exempts container `resources` and the scheduling
+  directives, and the exempt set includes the template's **labels**, which is
+  what this manifest's `NetworkPolicy` binds to. What refuses an added container
+  is narrower: `validatePodResourceUpdatesOnly` copies the new resources across
+  only when `len(newPod.Containers) == len(oldPodCopy.Containers)` and the names
+  line up index-for-index, then compares the whole pod spec for equality — so a
+  container list that grew, shrank, or was renamed fails in all three branches.
+  Live pods allow only `spec.containers[*].image` and
+  `spec.initContainers[*].image` to change. Container-list **membership** is
+  therefore genuinely held, and nobody edits a container into a live Job the way
+  they can raise `backoffLimit` or drop `parallelism` to 0.
+
+  What no manifest can hold is the **pod**: an ephemeral
+  container is added through the pod's own `ephemeralcontainers` subresource
+  rather than through the template (`kubectl debug` is the usual route), so it
+  never meets that immutability at all, it shares the pod's network namespace,
+  and it **cannot be removed once added**. Namespace RBAC on
+  `pods/ephemeralcontainers` is where that is refused, not the manifest — stated
+  in `EnforcementNotes` and pinned by a test, like every other bound in this
+  package.
 - **Kubernetes runner, slice 1: `andbo k8s render` CLI surface.** The renderer
   from slice 0 is now reachable: `andbo k8s render "<task>" --name <job>
   --namespace <ns> --workspace <empty|image:PATH>` loads your policy, builds the

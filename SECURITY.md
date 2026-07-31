@@ -51,7 +51,9 @@ boundaries **and the honest limitations** are, in short:
   also selects the pod, and it does nothing at all unless whoever applies the
   manifest applies it too. What Andbo *does* enforce is what it will emit —
   never privileged, no host namespaces, no `hostPath`, no service-account token,
-  non-root only, bounded resources and deadline — and what it refuses to emit:
+  non-root only, bounded resources and deadline, and exactly one agent container
+  (plus the one workspace init container `--workspace image:/path` asks for) —
+  and what it refuses to emit:
   `network.mode` `allowlist`/`open`, `runtime.isolation: local`, host mounts,
   and any host environment variable (a manifest is plain text in etcd, so
   secrets never cross). `andbo k8s render` writes the manifest and stops.
