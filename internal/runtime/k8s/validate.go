@@ -20,34 +20,101 @@ var (
 	envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
-// reservedNamespacePrefix is the prefix Kubernetes reserves for its own system
-// namespaces. Scheduling an agent in one would place it next to control-plane
-// workloads and their service accounts.
+// namespaceOwner names a namespace — or, in reservedNamespacePrefixes, a whole
+// family of them — together with the project that owns it. The owner is named
+// in the error so an operator can tell which of their cluster's components they
+// were about to sit an agent next to.
+type namespaceOwner struct {
+	ns    string
+	owner string
+}
+
+// reservedNamespacePrefixes are prefixes a platform RESERVES for its own system
+// namespaces. Scheduling an agent under one would place it next to
+// control-plane workloads and their service accounts.
 //
-// The check is on the PREFIX rather than on a list of names. The three
-// namespaces every cluster ships — kube-system, kube-public, kube-node-lease —
-// are not the whole set: the flannel CNI installs into kube-flannel, and the
-// prefix is reserved precisely so distributions can add more. A list would
-// silently stop covering whatever the next one is called.
+// The check is on the PREFIX rather than on a list of names, because the names
+// under it are open-ended: the three namespaces every cluster ships —
+// kube-system, kube-public, kube-node-lease — are not the whole set, the
+// flannel CNI installs into kube-flannel, and the prefix is reserved precisely
+// so distributions can add more. A list would silently stop covering whatever
+// the next one is called.
 //
-// The consequence is more than co-tenancy. EnforcementNotes names another
-// NetworkPolicy in the same namespace as the way this Job's default-deny is
-// defeated: policies are ADDITIVE, so whatever the cluster's own components
-// already have in their namespace, this one cannot subtract from it.
+// Only a platform that genuinely reserves the family belongs here. Kubernetes
+// documents kube- as reserved, and OpenShift enforces openshift- by refusing to
+// create a project under it. A prefix that is only a project's naming habit
+// does NOT go here — see reservedNamespaceNames for why.
+var reservedNamespacePrefixes = []namespaceOwner{
+	{"kube-", "Kubernetes"},
+	{"openshift-", "OpenShift"},
+}
+
+// reservedNamespaceNames are the namespaces a cluster-wide privileged component
+// conventionally installs into that no reserved prefix reaches.
 //
-// The prefix bounds the guard to what Kubernetes itself reserves. It does NOT
-// cover the system namespaces other projects and distributions choose for
-// themselves — kubeflow, kubernetes-dashboard, calico-system, tigera-operator,
-// istio-system, metallb-system, openshift-monitoring and the rest of
-// openshift-* — which this renderer has no way to recognise. The first two are
-// the ones to watch: each is "kube" followed by
-// something that is not the hyphen, so each misses this prefix by a single
-// character and renders looking like a name the guard weighed and cleared.
-// Rendering is not a verdict on any of them, and no list of names could be
-// exhaustive — that is what makes this a bound and not coverage. Note 3 of
-// EnforcementNotes is the standing answer: run agents in a dedicated namespace,
-// and audit the policy objects before applying.
-const reservedNamespacePrefix = "kube-"
+// The consequence of landing an agent in one is more than co-tenancy.
+// EnforcementNotes names another NetworkPolicy in the same namespace as the way
+// this Job's default-deny is defeated: policies are ADDITIVE, so whatever the
+// component already has in its namespace, this one cannot subtract from it.
+// Whether a given cluster really put that component there is not something this
+// renderer can know; the convention is the whole of the claim, and it is enough
+// to refuse on, because the cost of a wrong refusal is renaming a namespace and
+// the cost of a wrong acceptance is an agent inside the blast radius of a
+// cluster-wide service account.
+//
+// These are matched EXACTLY, not as prefixes. Kubernetes namespace names are
+// flat: "cert-manager-runs" has no relationship to "cert-manager", so promoting
+// one of these names to a prefix would refuse namespaces an operator may
+// legitimately dedicate to agent runs — and a renderer that refuses the safe
+// case teaches operators to work around it.
+//
+// That exactness is also the bound. The names a privileged project picks
+// outside this list, and the rest of any family only one member of which is
+// named here, still render — argocd, flux-system, linkerd, vault,
+// crossplane-system, rook-ceph, and the rest of Rancher's cattle-* family
+// beyond cattle-system, of which cattle-fleet-system is the one to watch —
+// because this renderer has no way to recognise them. Rendering is not a
+// verdict on any of them, and no list of names could be exhaustive; that is
+// what makes this a bound and not coverage. Note 3 of EnforcementNotes is the
+// standing answer: run agents in a dedicated namespace, and audit the policy
+// objects before applying.
+var reservedNamespaceNames = []namespaceOwner{
+	// Each is "kube" followed by something that is not the hyphen, so each
+	// misses the reserved prefix by a single character.
+	{"kubeflow", "Kubeflow"},
+	{"kubernetes-dashboard", "the Kubernetes Dashboard"},
+	// CNI and platform components, which run privileged by construction.
+	{"calico-system", "Calico"},
+	{"tigera-operator", "the Tigera operator"},
+	{"istio-system", "Istio"},
+	{"metallb-system", "MetalLB"},
+	{"openshift", "OpenShift"},
+	{"cattle-system", "Rancher"},
+	// Admission, certificate, ingress, and backup components: each holds
+	// cluster-wide RBAC, and the last three reach cluster-wide Secrets.
+	{"gatekeeper-system", "OPA Gatekeeper"},
+	{"kyverno", "Kyverno"},
+	{"cert-manager", "cert-manager"},
+	{"ingress-nginx", "the NGINX ingress controller"},
+	{"velero", "Velero"},
+}
+
+// reservedNamespaceProblem reports why ns must not host an agent Job, or "" if
+// this guard has nothing against it. Silence is not a clearance: see the bound
+// stated on reservedNamespaceNames.
+func reservedNamespaceProblem(ns string) string {
+	for _, r := range reservedNamespacePrefixes {
+		if strings.HasPrefix(ns, r.ns) {
+			return fmt.Sprintf("namespace %q is reserved for cluster control-plane workloads: %s reserves the %q prefix for its own system namespaces, so a Job there shares a namespace with cluster components and their service accounts. NetworkPolicies are also additive, so whatever policy that namespace already carries, this Job's default-deny cannot subtract from it. Use a dedicated namespace for agent runs (e.g. \"andbo-runs\")", ns, r.owner, r.ns)
+		}
+	}
+	for _, r := range reservedNamespaceNames {
+		if ns == r.ns {
+			return fmt.Sprintf("namespace %q belongs to %s: it is a namespace that project installs, and its components hold cluster-wide privilege, so a Job there shares a namespace with them and their service accounts — and this renderer cannot know what else your cluster put in it. NetworkPolicies are also additive, so whatever policy that namespace already carries, this Job's default-deny cannot subtract from it. Use a dedicated namespace for agent runs (e.g. \"andbo-runs\")", ns, r.owner)
+		}
+	}
+	return ""
+}
 
 // reservedMountPaths are directories the container image or the kernel owns.
 // The working directory is mounted as an EMPTY volume, so overlaying any of
@@ -163,8 +230,10 @@ func (s JobSpec) Validate() error {
 		add("namespace %q is not a DNS-1123 label; use lowercase letters, digits, and '-'", s.Namespace)
 	case len(s.Namespace) > MaxNamespaceLength:
 		add("namespace is %d characters; Kubernetes namespace names are limited to %d", len(s.Namespace), MaxNamespaceLength)
-	case strings.HasPrefix(s.Namespace, reservedNamespacePrefix):
-		add("namespace %q is reserved for cluster control-plane workloads: Kubernetes reserves the %q prefix for its own system namespaces, so a Job there shares a namespace with cluster components and their service accounts. NetworkPolicies are also additive, so whatever policy that namespace already carries, this Job's default-deny cannot subtract from it. Use a dedicated namespace for agent runs (e.g. \"andbo-runs\")", s.Namespace, reservedNamespacePrefix)
+	default:
+		if p := reservedNamespaceProblem(s.Namespace); p != "" {
+			problems = append(problems, p)
+		}
 	}
 
 	// Workload.

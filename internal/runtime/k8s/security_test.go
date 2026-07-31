@@ -129,6 +129,10 @@ func TestSecurity_ReservedNamespacePrefixIsRefused(t *testing.T) {
 		// The PREFIX is what is reserved, so the tail does not matter: these
 		// are arbitrary names under it, not namespaces known to exist.
 		"kube-apiserver", "kube-ovn", "kube-a",
+		// OpenShift reserves its own prefix the same way, and enforces it:
+		// the cluster refuses to create a project under openshift-. The tail
+		// does not matter here either.
+		"openshift-monitoring", "openshift-apiserver", "openshift-ingress", "openshift-a",
 	}
 	for _, ns := range refused {
 		t.Run("refused/"+ns, func(t *testing.T) {
@@ -182,40 +186,123 @@ func TestSecurity_ReservedNamespacePrefixIsRefused(t *testing.T) {
 	}
 }
 
-// residualSystemNamespaces are names that a cluster-wide privileged add-on
-// conventionally installs into, and that this guard does NOT refuse, because
-// they sit outside the prefix Kubernetes reserves for itself. What any given
-// cluster actually put in them is not something this renderer can know — the
-// convention is the whole of the claim, and it is enough: an operator picking a
-// namespace for agent runs should not pick one a project already named.
+// systemAddOnNamespaces are the exact names a cluster-wide privileged add-on
+// conventionally installs into. None of them sits under a prefix any platform
+// reserves, so each has to be named to be refused.
 //
-// kubeflow and kubernetes-dashboard are the two to watch. Each is "kube"
-// followed by something that is not the hyphen, so each misses this prefix by a
-// single character and renders looking like a name the guard weighed and
-// cleared. Neither is.
+// kubeflow and kubernetes-dashboard are the two that make the case for naming
+// them. Each is "kube" followed by something that is not the hyphen, so each
+// misses the reserved prefix by a single character — a guard that only tested
+// the prefix rendered them looking like names it had weighed and cleared.
 //
-// The list is illustrative, not exhaustive — no list could be, which is the
-// point of a bound. It holds the names most likely to be mistaken for cleared
-// ones.
-var residualSystemNamespaces = []string{
+// What any given cluster actually put in these is not something this renderer
+// can know. The convention is the whole of the claim, and it is enough to
+// refuse on: the cost of a wrong refusal is an operator renaming a namespace,
+// and the cost of a wrong acceptance is an agent sharing a namespace with a
+// component that holds cluster-wide privilege, under a default-deny that
+// NetworkPolicy additivity will not let this Job enforce.
+var systemAddOnNamespaces = []string{
 	"kubeflow",
 	"kubernetes-dashboard",
 	"calico-system",
 	"tigera-operator",
 	"istio-system",
 	"metallb-system",
-	"openshift-monitoring",
+	"openshift",
+	"cattle-system",
+	"gatekeeper-system",
+	"kyverno",
+	"cert-manager",
+	"ingress-nginx",
+	"velero",
+}
+
+// TestSecurity_SystemAddOnNamespacesAreRefused covers the names outside every
+// reserved prefix that a privileged add-on still owns.
+//
+// The reason is the one on the prefix guard: EnforcementNotes names another
+// NetworkPolicy in the same namespace as the way this Job's default-deny is
+// silently defeated, because policies are additive and cannot subtract from one
+// another. A namespace belonging to a component that holds cluster-wide
+// privilege is exactly where that bites, and no prefix test reaches these.
+func TestSecurity_SystemAddOnNamespacesAreRefused(t *testing.T) {
+	for _, ns := range systemAddOnNamespaces {
+		t.Run("refused/"+ns, func(t *testing.T) {
+			s := validSpec()
+			s.Namespace = ns
+
+			// Render, not Validate: Render is the only surface that produces
+			// bytes an operator can apply, so it is the one that has to refuse.
+			_, err := s.Render()
+			if err == nil {
+				t.Fatalf("Render() accepted namespace %q, want a rejection", ns)
+			}
+			// What failed, why, and how to fix it. "privileg" is the why these
+			// names are refused at all — without it the error asserts only that
+			// the name is taken, which is hygiene, not a security reason.
+			for _, want := range []string{ns, "privileg", "additive", "dedicated namespace"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error does not contain %q, so it does not explain what failed, why, and how to fix it:\n%v", want, err)
+				}
+			}
+		})
+	}
+
+	// The match has to be EXACT. Namespace names are flat — Kubernetes gives
+	// "cert-manager-runs" no relationship to "cert-manager" — so treating one of
+	// these names as a prefix would refuse namespaces an operator may
+	// legitimately dedicate to agent runs, and a renderer that refuses the safe
+	// case teaches operators to work around it. Only a platform that actually
+	// reserves a family gets a prefix test, which is why these are not in it.
+	for _, ns := range []string{"cert-manager-runs", "velero-agent-runs", "kyverno-agent", "andbo-istio-system"} {
+		t.Run("allowed/"+ns, func(t *testing.T) {
+			s := validSpec()
+			s.Namespace = ns
+
+			manifest, err := s.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil for namespace %q: these names are matched exactly, not as prefixes", err, ns)
+			}
+			assertHardened(t, manifest)
+			if got := dig(t, docs(t, manifest)[1], "metadata", "namespace"); got != ns {
+				t.Errorf("Job metadata.namespace = %v, want %q", got, ns)
+			}
+		})
+	}
+}
+
+// residualSystemNamespaces are names a privileged project conventionally
+// installs into that this guard still does NOT refuse, because they are neither
+// under a reserved prefix nor named in systemAddOnNamespaces.
+//
+// cattle-fleet-system is the one to watch. Rancher spreads itself across a
+// cattle-* family, but Rancher does not RESERVE that prefix the way Kubernetes
+// reserves kube- and OpenShift reserves openshift-, so only the name this guard
+// states — cattle-system — is refused, and the rest of the family renders.
+// "openshift" without the hyphen is the same shape of gap against a prefix that
+// is reserved.
+//
+// The list is illustrative, not exhaustive — no list could be, which is the
+// point of a bound. It holds the names most likely to be mistaken for cleared
+// ones.
+var residualSystemNamespaces = []string{
+	"argocd",
+	"flux-system",
+	"linkerd",
+	"vault",
+	"crossplane-system",
+	"rook-ceph",
+	"cattle-fleet-system",
 }
 
 // TestSecurity_ReservedNamespaceBoundIsDocumentedAndTrue covers the guard's
 // stated BOUND rather than what it refuses.
 //
-// The guard refuses the prefix Kubernetes reserves and nothing else, so every
-// system namespace another project or distribution picked for itself still
-// renders. That residual is a claim this package makes about itself — it is
-// written on reservedNamespacePrefix — and both halves of it need checking:
-// every namespace this package files as residual has to appear in that bound,
-// and each one has to actually still render.
+// The guard refuses two reserved prefixes and a list of names, so every system
+// namespace outside both still renders. That residual is a claim this package
+// makes about itself — it is written on reservedNamespaceNames — and both
+// halves of it need checking: every namespace this package files as residual
+// has to appear in that bound, and each one has to actually still render.
 //
 // The first half is what keeps the two lists from disagreeing. It does not make
 // either exhaustive, and neither claims to be: a name absent from BOTH is
@@ -229,8 +316,8 @@ func TestSecurity_ReservedNamespaceBoundIsDocumentedAndTrue(t *testing.T) {
 	// not in it. Both anchors and the enclosing comment are load-bearing, so
 	// rewording either fails this test rather than silently skipping it.
 	const (
-		listOpen  = "choose for themselves — "
-		listClose = " — which this renderer"
+		listOpen  = "still render — "
+		listClose = " — because this renderer"
 	)
 	src, err := os.ReadFile("validate.go")
 	if err != nil {
@@ -242,7 +329,7 @@ func TestSecurity_ReservedNamespaceBoundIsDocumentedAndTrue(t *testing.T) {
 	start := strings.Index(flat, listOpen)
 	end := strings.Index(flat, listClose)
 	if start < 0 || end < start {
-		t.Fatalf("cannot find the enumerated residual in the doc comment on reservedNamespacePrefix in validate.go, between %q and %q; that enumeration is the guard's stated bound and is what this test checks", listOpen, listClose)
+		t.Fatalf("cannot find the enumerated residual in the doc comment on reservedNamespaceNames in validate.go, between %q and %q; that enumeration is the guard's stated bound and is what this test checks", listOpen, listClose)
 	}
 	enumerated := flat[start+len(listOpen) : end]
 
@@ -262,7 +349,7 @@ func TestSecurity_ReservedNamespaceBoundIsDocumentedAndTrue(t *testing.T) {
 
 			manifest, err := s.Render()
 			if err != nil {
-				t.Fatalf("Render() = %v, want nil: the guard covers only the %q prefix, and the stated bound says this namespace renders", err, reservedNamespacePrefix)
+				t.Fatalf("Render() = %v, want nil: the guard covers the reserved prefixes and the names it states, and the stated bound says this namespace renders", err)
 			}
 			assertHardened(t, manifest)
 			if got := dig(t, docs(t, manifest)[1], "metadata", "namespace"); got != ns {
