@@ -84,17 +84,31 @@ All notable changes to Andbo are documented here.
 
   Both now resolve the adapter through `adapters.Get` — the *same* resolution
   `run` and `k8s render` perform, not a second list of names kept beside the
-  registry — so the set the gates accept cannot drift from the set that actually
-  runs. `policy check` reports it through `check.Errors`, so it reaches `--json`
-  and the human report alike under that command's existing invalid-policy exit
-  `7`; doctor reports it on its `config` line and still exits `0`.
+  registry — so the set of adapter **names** the gates accept cannot drift from
+  the set those two resolve. `policy check` reports it through `check.Errors`, so
+  it reaches `--json` and the human report alike under that command's existing
+  invalid-policy exit `7`; doctor reports it on its `config` line and still
+  exits `0`.
 
-  Nothing else changed. `run`, `exec`, and `k8s render` keep their own exit `4`
-  from `adapters.Get`, the rendered Kubernetes Job and NetworkPolicy bytes are
+  Nothing else changed. `run` and `k8s render` keep their own exit `4` from
+  `adapters.Get`, the rendered Kubernetes Job and NetworkPolicy bytes are
   identical, and every policy with a supported `agent.default` — including all
   four shipped `examples/*.yaml` — produces byte-identical output. `--agent NAME`
-  still overrides a broken `agent.default` for a single run: the check reads the
-  effective policy, not the raw file, so the flag wins as it always did.
+  still overrides a broken `agent.default` for a single run, because the check
+  lives in the two gates and not in the validation `run` performs *before* it
+  applies flag overrides.
+
+  `andbo exec` is the one surface left out, and it now disagrees with the gates
+  on purpose: it resolves no adapter — the caller supplies the command, so the
+  caller is the agent — and runs one of these policies to completion at exit `0`
+  while `policy check` calls the file invalid. Making `exec` refuse an agent it
+  never consults would be a false alarm on the surface that needs none.
+
+  The gate answers for the **name**, and only the name: `agent.default: custom`
+  with an empty `agent.custom.command` still resolves — the failure lives in the
+  adapter's `BuildCommand` — so it is still reported valid here and refused by
+  `run` at exit `4`. That is a second gap in a different field, left for its own
+  milestone rather than folded into this one. It is unchanged from before.
 - **`andbo doctor` reported `config: ✓ andbo.yaml valid` for policies every
   other command refuses.** It only asked whether the YAML decoded, so a
   `network.mode: bogus`, a `secrets.mode: env`, an empty `runtime.image`, or a

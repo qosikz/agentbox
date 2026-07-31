@@ -15,9 +15,14 @@ import (
 //
 // The verdict comes from adapters.Get — the same resolution `andbo run` and
 // `andbo k8s render` already perform — and not from a second list of names kept
-// beside the registry, so the set these gates accept cannot drift from the set
-// that actually runs. The adapter is resolved and discarded; the custom config
-// is threaded through only because Get's signature takes it.
+// beside the registry, so the set of NAMES these gates accept cannot drift from
+// the set those two resolve. The adapter is resolved and discarded; the custom
+// config is threaded through only because Get's signature takes it.
+//
+// The name is all this answers for. `custom` with an empty agent.custom.command
+// resolves here and then fails at BuildCommand, so it is still reported valid by
+// both gates and refused by run at exit 4 — a second gap, in a different field,
+// left for its own milestone rather than widened into this one.
 //
 // It returns a plain error rather than a coded one because both callers use the
 // TEXT: `policy check` folds it into check.Errors under that command's own

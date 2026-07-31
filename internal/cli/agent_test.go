@@ -78,8 +78,15 @@ func TestPolicyCheckRefusesAnAgentDefaultNoAdapterAnswersTo(t *testing.T) {
 			if CodeFor(err) != ExitInvalidConfig {
 				t.Fatalf("exit code = %d, want %d (err=%v)\n%s", CodeFor(err), ExitInvalidConfig, err, out)
 			}
-			if strings.Contains(out, "✓ Policy valid") {
-				t.Errorf("policy check still printed its valid line:\n%s", out)
+			// Asserting the absence of the exact success string would weld this
+			// to that one phrase: a reworded "✓ Policy OK" printed beside the
+			// errors would pass. No line of a refusal may open with the success
+			// glyph at all — errors, unsafe options, and enforcement notes each
+			// carry their own.
+			for _, line := range strings.Split(out, "\n") {
+				if strings.HasPrefix(line, "✓") {
+					t.Errorf("a refusal printed a success line %q:\n%s", line, out)
+				}
 			}
 			assertNamesTheAgentFault(t, out, tc.value)
 		})
@@ -162,6 +169,20 @@ func TestAgentDefaultIsRefusedBeforeRunAndK8sRender(t *testing.T) {
 				t.Errorf("a refused render must write nothing to stdout, got:\n%s", k8sOut)
 			}
 
+			// exec is deliberately outside the agreement: it resolves no adapter
+			// at all, because the caller supplies the command and is therefore
+			// the agent. So the gates now refuse a policy exec runs to
+			// completion. Pinned in both directions — as a decision rather than
+			// an accident — since every other invalid-policy case in this package
+			// asserts that exec refuses too.
+			execOut, execErr := captureStderr(t, func() error {
+				return NewRoot("test", "none", "now").cmdExec(context.Background(), []string{"echo hi", "--dry-run"})
+			})
+			if execErr != nil {
+				t.Errorf("exec refuses a policy whose agent it never consults: exit=%d err=%v\n%s",
+					CodeFor(execErr), execErr, execOut)
+			}
+
 			checkOut, checkErr := captureStdout(t, func() error {
 				return NewRoot("test", "none", "now").cmdPolicy([]string{"check"})
 			})
@@ -175,12 +196,69 @@ func TestAgentDefaultIsRefusedBeforeRunAndK8sRender(t *testing.T) {
 	}
 }
 
+// The refusal echoes a value the POLICY FILE controls into doctor's aligned
+// check table, a surface this milestone put it on for the first time. %q is the
+// only thing standing between an untrusted andbo.yaml and live control bytes
+// there: a carriage return plus an erase-line escape rewrites the row it is
+// printed on, so a policy could erase its own ✗ and leave behind a row that
+// reads as passing. Swapping %q for %s in the error leaves every other assertion
+// in this file — and in the rest of the repo — green, so it is pinned here.
+//
+// Asserted on the two surfaces this commit created: doctor's detail and policy
+// check's error strings. `policy check`'s human report separately echoes the
+// agent name raw in its "Agent:" line (internal/policy/effective.go), which
+// predates this change and is not what this test covers.
+func TestAgentDefaultCannotSmuggleControlBytesIntoTheReport(t *testing.T) {
+	// A double-quoted YAML scalar: ESC, erase-line, CR, then a forged row, and
+	// a NUL for good measure.
+	agentProject(t, `"x\e[2K\r\0  ✓ config         andbo.yaml valid"`)
+
+	// Newlines are not in this set: the error carries its fix on a second line,
+	// from the format string rather than from the policy. Doctor flattens those,
+	// and that is asserted separately below.
+	const raw = "\x1b\r\x00"
+	got := doctorConfigCheck(t)
+	if got.OK {
+		t.Fatalf("doctor calls the hostile policy valid: %s", got.Detail)
+	}
+	if strings.ContainsAny(got.Detail, raw+"\n") {
+		t.Errorf("doctor's check table carries raw control bytes from the policy:\n%q", got.Detail)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return NewRoot("test", "none", "now").cmdPolicy([]string{"check", "--json"})
+	})
+	if CodeFor(err) != ExitInvalidConfig {
+		t.Fatalf("exit code = %d, want %d\n%s", CodeFor(err), ExitInvalidConfig, out)
+	}
+	var decoded struct {
+		Errors []string `json:"errors"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &decoded); jerr != nil {
+		t.Fatalf("policy check --json is not valid JSON: %v\n%s", jerr, out)
+	}
+	if len(decoded.Errors) == 0 {
+		t.Fatalf("policy check --json reported no errors for a policy it refused:\n%s", out)
+	}
+	for _, e := range decoded.Errors {
+		if strings.ContainsAny(e, raw) {
+			t.Errorf("policy check's error carries raw control bytes from the policy:\n%q", e)
+		}
+	}
+}
+
 // The other half of the contract, and the one a false positive would break: the
 // set policy check accepts is the adapter registry's, not a second list beside
 // it. An adapter added to adapters.SupportedNames later is accepted here with
 // no edit; one that stops resolving turns this red rather than quietly making
 // every policy naming it unrunnable-but-valid.
 func TestEverySupportedAgentPassesPolicyCheckAndDoctor(t *testing.T) {
+	// The whole table is that one call, so an empty return would run zero
+	// subtests and report PASS — and would silently drop the same names from
+	// assertNamesTheAgentFault's needles.
+	if len(adapters.SupportedNames()) == 0 {
+		t.Fatal("adapters.SupportedNames() is empty; this test would assert nothing")
+	}
 	for _, name := range adapters.SupportedNames() {
 		t.Run(name, func(t *testing.T) {
 			agentProject(t, name)
@@ -205,14 +283,28 @@ func TestEverySupportedAgentPassesPolicyCheckAndDoctor(t *testing.T) {
 // adapter is resolved. Validating the raw file's agent.default inside
 // config.Check would break this: run calls Check before it applies overrides,
 // so a policy with a bad default plus a good --agent would stop working.
+//
+// "The run did not fail" is too weak an assertion to carry that: a run honouring
+// the flag but resolving some OTHER adapter also exits 0, and would have Andbo's
+// own session record name one agent while a different one executed. The plan is
+// asserted instead, on stdout — cmdRun RETURNS its error rather than printing
+// it, so stderr is empty on both paths and proves nothing either way.
 func TestAgentFlagStillOverridesABrokenPolicyDefault(t *testing.T) {
 	agentProject(t, "bogus")
 
-	out, err := captureStderr(t, func() error {
+	out, err := captureStdout(t, func() error {
 		return NewRoot("test", "none", "now").cmdRun(context.Background(),
 			[]string{"fix failing tests", "--dry-run", "--agent", "custom"})
 	})
 	if err != nil {
 		t.Fatalf("run --agent custom failed: exit=%d err=%v\n%s", CodeFor(err), err, out)
+	}
+	// The command line the custom adapter builds from the policy's echo stub.
+	// This is what would actually have run, not what the run says it selected.
+	if !strings.Contains(out, "exec: echo fix failing tests") {
+		t.Errorf("run reports no plan built by the agent --agent named:\n%s", out)
+	}
+	if !strings.Contains(out, "Agent: custom") {
+		t.Errorf("run does not record the agent --agent named:\n%s", out)
 	}
 }
