@@ -6,9 +6,37 @@ import (
 	"os"
 	"strings"
 
+	"github.com/qosikz/andbo/internal/adapters"
 	"github.com/qosikz/andbo/internal/config"
 	"github.com/qosikz/andbo/internal/policy"
 )
+
+// checkAgentDefault refuses a policy whose agent.default names no adapter.
+//
+// The verdict comes from adapters.Get — the same resolution `andbo run` and
+// `andbo k8s render` already perform — and not from a second list of names kept
+// beside the registry, so the set of NAMES these gates accept cannot drift from
+// the set those two resolve. The adapter is resolved and discarded; the custom
+// config is threaded through only because Get's signature takes it.
+//
+// The name is all this answers for. `custom` with an empty agent.custom.command
+// resolves here and then fails at BuildCommand, so it is still reported valid by
+// both gates and refused by run at exit 4 — a second gap, in a different field,
+// left for its own milestone rather than widened into this one.
+//
+// It returns a plain error rather than a coded one because both callers use the
+// TEXT: `policy check` folds it into check.Errors under that command's own
+// invalid-config exit, and doctor reports it. run and k8s render keep refusing
+// at adapters.Get with ExitAgentFailed. This closes the gap in front of them; it
+// does not renumber what they already refuse.
+func checkAgentDefault(agent string, custom config.CustomAgentConfig, policyPath string) error {
+	if _, err := adapters.Get(agent, custom); err == nil {
+		return nil
+	}
+	return fmt.Errorf(
+		"agent.default %q is invalid (expected: %s).\nSet agent.default in %s to one of those, or pass --agent NAME to choose one for a single run.",
+		agent, strings.Join(adapters.SupportedNames(), ", "), policyPath)
+}
 
 func (r *Root) cmdPolicy(args []string) error {
 	if len(args) == 0 || args[0] != "check" {
@@ -32,6 +60,11 @@ func (r *Root) cmdPolicy(args []string) error {
 	// It is reported through check.Errors so it reaches --json and the human
 	// output alike, under this command's own invalid-policy exit code.
 	if err := checkBudgetMinutes(ep.Budget.MaxRuntimeMinutes, path); err != nil {
+		check.Errors = append(check.Errors, err.Error())
+	}
+	// Same gap, one field over: an agent.default no adapter answers to passed
+	// this gate and then killed `andbo run` and `andbo k8s render` at exit 4.
+	if err := checkAgentDefault(ep.Agent.Default, cfg.Agent.Custom, path); err != nil {
 		check.Errors = append(check.Errors, err.Error())
 	}
 
