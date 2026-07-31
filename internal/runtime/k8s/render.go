@@ -282,8 +282,11 @@ func (s JobSpec) Render() (string, error) {
 		},
 	}
 
-	// Defence in depth, and the last thing checked before encoding.
+	// Defence in depth, and the last things checked before encoding.
 	if err := bindsPolicyToPod(np, j); err != nil {
+		return "", err
+	}
+	if err := runsOnePodWithFreshImages(j); err != nil {
 		return "", err
 	}
 
@@ -339,6 +342,50 @@ func bindsPolicyToPod(np networkPolicy, j job) error {
 	for k, v := range np.Spec.PodSelector.MatchLabels {
 		if podLabels[k] != v {
 			return fmt.Errorf("internal error: NetworkPolicy selector label %q=%q is not on the Job pod template; refusing to render a policy that would not apply", k, v)
+		}
+	}
+	return nil
+}
+
+// runsOnePodWithFreshImages reports whether the rendered Job would start exactly
+// one pod attempt, and whether every container it starts re-resolves its image.
+//
+// Two properties, one guard, because they share a failure mode: both are
+// constants of this contract that render sets inline, both are invisible in a
+// manifest that otherwise reads as correct, and neither is caught by validation
+// — JobSpec has no field for either, so there is nothing at the boundary to
+// check.
+//
+//   - completions and parallelism above 1 turn one requested run into several
+//     concurrent agents. Every side effect the run has outside the pod — a
+//     commit, a push, a pull request, a tool call — happens once per pod, from
+//     pods racing each other on the same repository with the same credentials.
+//     Below 1 is the other direction of the same drift: parallelism 0 suspends
+//     the Job, so the manifest applies cleanly and the agent never runs.
+//   - imagePullPolicy anything but Always lets the kubelet serve whatever the
+//     node's cache already holds for that reference. An empty value is the same
+//     outcome by omission: the kubelet's default is Always only for the :latest
+//     tag and IfNotPresent for everything else, which is every digest-pinned
+//     spec this package tells callers to prefer.
+//
+// It reads the CONSTRUCTED Job rather than the values that fed it, so this
+// covers containers that do not exist yet: adding a sidecar or a second init
+// container without a pull policy fails the render instead of shipping a
+// container that quietly runs an older image.
+//
+// The bound is the same one bindsPolicyToPod carries: no test can prove this
+// function was CALLED, because deleting the call site changes no output while
+// render is correct. What is testable is the property itself, which
+// TestSecurity_JobRunsOnePodPerRun and
+// TestSecurity_EveryContainerRePullsItsImage pin on the rendered manifest,
+// guard or no guard.
+func runsOnePodWithFreshImages(j job) error {
+	if j.Spec.Completions != 1 || j.Spec.Parallelism != 1 {
+		return fmt.Errorf("internal error: Job %q renders completions=%d parallelism=%d, and an agent run must be exactly one pod: above 1 the Job starts concurrent agents that each repeat the run's commits, pushes, and tool calls, and below 1 it starts none; refusing to render it", j.Metadata.Name, j.Spec.Completions, j.Spec.Parallelism)
+	}
+	for _, c := range append(append([]container{}, j.Spec.Template.Spec.InitContainers...), j.Spec.Template.Spec.Containers...) {
+		if c.ImagePullPolicy != "Always" {
+			return fmt.Errorf("internal error: container %q in Job %q renders imagePullPolicy %q, want \"Always\": the kubelet would then serve whatever image its node has cached for %q — and an empty policy is the same outcome, since the kubelet defaults to IfNotPresent for every reference except the :latest tag; refusing to render a run that could start from a stale or tampered image", c.Name, j.Metadata.Name, c.ImagePullPolicy, c.Image)
 		}
 	}
 	return nil

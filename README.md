@@ -453,13 +453,27 @@ applies that, not the CNI, so it holds even where the `NetworkPolicy` does not
 that picks its own resolver socket never reads `resolv.conf`), no host
 namespaces, no `hostPath` (size-limited `emptyDir` is the only volume source),
 required CPU/memory requests and limits, `HOME` pointed at the writable volume
-(the root filesystem is read-only), and a bounded `ttlSecondsAfterFinished` and
-`activeDeadlineSeconds` — the latter from `budget.max_runtime_minutes`, or 1800s
-when that is `0`. (`andbo run` reads `0` as "no deadline"; a pod nobody is
-supervising always gets one. A negative is not a duration and stops the render
-as an invalid policy, rather than falling through to that same default.)
-Rendering is deterministic, so the same inputs produce a byte-identical manifest
-you can diff and pin.
+(the root filesystem is read-only), `completions: 1` with `parallelism: 1`, and
+`imagePullPolicy: Always` on **every** container the pod starts (the agent's and,
+with `--workspace image:/path`, the init container's), plus a bounded
+`ttlSecondsAfterFinished` and `activeDeadlineSeconds` — the latter from
+`budget.max_runtime_minutes`, or 1800s when that is `0`. (`andbo run` reads `0`
+as "no deadline"; a pod nobody is supervising always gets one. A negative is not
+a duration and stops the render as an invalid policy, rather than falling through
+to that same default.) Rendering is deterministic, so the same inputs produce a
+byte-identical manifest you can diff and pin.
+
+Two of those need their limits read with them. `parallelism: 1` bounds what the
+**Job schedules** and is not at-most-once execution — the cluster can still start
+the same run twice (node failure, preemption, pod deletion), and nothing stops a
+second Job being applied from the same manifest, so agent side effects still have
+to be idempotent or keyed by a run ID. And `imagePullPolicy: Always` re-resolves
+the image **reference** on every start, so a node cannot silently serve a stale or
+tampered cached layer for it — but re-resolving a *mutable tag* can return
+different bytes each time. It is an identity guarantee only when `runtime.image`
+is pinned by digest. The pull itself is the kubelet's, from whatever registry and
+credentials the node has: Andbo neither signs, verifies, nor admits the image, and
+the `NetworkPolicy` does not restrict the pull.
 
 Where it fails closed instead of downgrading — all of these exit **2**:
 `network.mode` `allowlist` and `open` are **rejected** (NetworkPolicy selects by

@@ -44,6 +44,17 @@ var (
 	mustBeFalse   = []string{"privileged", "hostNetwork", "hostPID", "hostIPC", "allowPrivilegeEscalation", "automountServiceAccountToken"}
 	mustBeTrue    = []string{"readOnlyRootFilesystem", "runAsNonRoot"}
 	mustBeNonZero = []string{"runAsUser", "runAsGroup", "fsGroup"}
+	// mustEqual are fields whose rendered value is a constant of the contract
+	// rather than a caller input, so any other value is drift. Checked wherever
+	// they appear, for the same reason the lists above are: a weakened value
+	// must not be able to hide in a structure the top-level assertions do not
+	// walk into. Presence is checked separately (see assertContainersRePull) —
+	// this list can only speak for keys that were rendered.
+	mustEqual = map[string]any{
+		"imagePullPolicy": "Always",
+		"parallelism":     1,
+		"completions":     1,
+	}
 )
 
 // walk visits every mapping in a decoded manifest, reporting the path so a
@@ -69,6 +80,8 @@ func walk(node any, path string, visit func(path string, m map[string]any)) {
 func assertHardened(t *testing.T, manifest string) {
 	t.Helper()
 
+	assertContainersRePull(t, manifest)
+
 	for _, doc := range docs(t, manifest) {
 		walk(doc, doc["kind"].(string), func(path string, m map[string]any) {
 			for _, k := range forbiddenKeys {
@@ -91,6 +104,11 @@ func assertHardened(t *testing.T, manifest string) {
 					t.Errorf("%s.%s = 0 (root), must be non-zero", path, k)
 				}
 			}
+			for k, want := range mustEqual {
+				if v, present := m[k]; present && v != want {
+					t.Errorf("%s.%s = %v, must be %v", path, k, v, want)
+				}
+			}
 			// Volumes may only be size-limited emptyDirs. This is what makes a
 			// hostPath / docker-socket mount structurally impossible rather
 			// than merely absent by default.
@@ -104,6 +122,21 @@ func assertHardened(t *testing.T, manifest string) {
 				}
 			}
 		})
+	}
+}
+
+// assertContainersRePull is the ABSENCE half of the imagePullPolicy invariant,
+// which mustEqual cannot cover: that list compares keys that were rendered, and
+// an omitted policy renders no key at all. Omission is not a neutral outcome —
+// the kubelet then defaults to IfNotPresent for every reference but the :latest
+// tag — so every container the pod starts has to name the policy.
+func assertContainersRePull(t *testing.T, manifest string) {
+	t.Helper()
+
+	for name, c := range allContainers(t, manifest) {
+		if v, present := c["imagePullPolicy"]; !present || v != "Always" {
+			t.Errorf("container %q imagePullPolicy = %v (present=%v), want Always", name, v, present)
+		}
 	}
 }
 
