@@ -292,8 +292,9 @@ func k8sRender(args []string, out, errOut io.Writer) error {
 
 	// Validate explicitly, ahead of Render, so only VALIDATION failures get the
 	// field-to-flag mapping appended. Render's other failure — the internal
-	// selector-drift guard — is a bug in Andbo, not something the operator can
-	// fix by changing a flag, and must not be dressed up as one.
+	// guard that the NetworkPolicy still binds to the pod — is a bug in Andbo,
+	// not something the operator can fix by changing a flag, and must not be
+	// dressed up as one.
 	if err := spec.Validate(); err != nil {
 		// Validate reports MANIFEST field names, which a CLI user never typed.
 		// Map them back to the inputs that produced them, or the error is not

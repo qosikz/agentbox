@@ -820,3 +820,178 @@ func TestSecurity_QuantityGrammarMatchesKubernetes(t *testing.T) {
 		})
 	}
 }
+
+// boundPolicyPod builds a (NetworkPolicy, Job) pair in the shape Render
+// produces, so each case below can diverge exactly one axis of the binding.
+func boundPolicyPod(policyNS, jobNS string, selector, podLabels map[string]string) (networkPolicy, job) {
+	np := networkPolicy{
+		APIVersion: "networking.k8s.io/v1",
+		Kind:       "NetworkPolicy",
+		Metadata:   objectMeta{Name: "fix-tests-deny-all", Namespace: policyNS, Labels: podLabels},
+		Spec: networkPolicySpec{
+			PodSelector: labelSelector{MatchLabels: selector},
+			PolicyTypes: []string{"Ingress", "Egress"},
+		},
+	}
+	j := job{
+		APIVersion: "batch/v1",
+		Kind:       "Job",
+		Metadata:   objectMeta{Name: "fix-tests", Namespace: jobNS, Labels: podLabels},
+		Spec:       jobSpec{Template: podTemplate{Metadata: templateMeta{Labels: podLabels}}},
+	}
+	return np, j
+}
+
+// TestSecurity_UnboundNetworkPolicyIsRefused covers the second half of what
+// makes a NetworkPolicy apply to a pod.
+//
+// Kubernetes requires BOTH conditions, and podSelector is only one of them: a
+// NetworkPolicy is a namespaced object with no cross-namespace form, so it
+// reaches only pods in its OWN namespace. A policy whose namespace drifts from
+// the Job's still selects on labels that match, still applies cleanly, and
+// still reads as a default-deny — while denying nothing to the pod it was
+// rendered for. Render already refuses label drift for exactly this reason;
+// namespace drift has the same consequence and must be refused the same way.
+//
+// The bound: this proves the guard REFUSES an unbound pair. It cannot prove
+// Render calls it — deleting the call site changes no output, so no test fails,
+// and no test can be written that would. What
+// TestSecurity_NetworkPolicyLandsInThePodsNamespace adds is not that call but
+// the property: drift that actually reaches the rendered manifest fails there
+// whether or not the guard is still wired in.
+func TestSecurity_UnboundNetworkPolicyIsRefused(t *testing.T) {
+	labels := map[string]string{labelName: labelValueName, labelInstance: "fix-tests"}
+	selector := map[string]string{labelName: labelValueName, labelInstance: "fix-tests"}
+
+	tests := []struct {
+		name     string
+		policyNS string
+		jobNS    string
+		selector map[string]string
+		// substr must appear in the error, so the message names the axis that
+		// drifted rather than reporting an unattributable "internal error".
+		// Empty means the pair is bound and must render.
+		substr string
+	}{
+		{
+			name:     "bound: same namespace, selector on the pod",
+			policyNS: "andbo-runs", jobNS: "andbo-runs", selector: selector,
+		},
+		{
+			name:     "policy lands in another namespace",
+			policyNS: "default", jobNS: "andbo-runs", selector: selector,
+			substr: "restricts only pods in its own namespace",
+		},
+		{
+			name:     "policy carries no namespace, job does",
+			policyNS: "", jobNS: "andbo-runs", selector: selector,
+			substr: "names no namespace",
+		},
+		{
+			name:     "job carries no namespace, policy does",
+			policyNS: "andbo-runs", jobNS: "", selector: selector,
+			substr: "restricts only pods in its own namespace",
+		},
+		{
+			// Both would land in the operator's context namespace, so these two
+			// DO still bind to each other. What is lost is that the manifest no
+			// longer says where the run is confined, which is a different
+			// failure and must not be reported as unrestricted egress.
+			name:     "neither names a namespace",
+			policyNS: "", jobNS: "", selector: selector,
+			substr: "neither",
+		},
+		{
+			name:     "selector names a label the pod does not carry",
+			policyNS: "andbo-runs", jobNS: "andbo-runs",
+			selector: map[string]string{labelName: labelValueName, "extra": "x"},
+			substr:   "selector label",
+		},
+		{
+			name:     "selector names a label the pod carries with another value",
+			policyNS: "andbo-runs", jobNS: "andbo-runs",
+			selector: map[string]string{labelInstance: "other-run"},
+			substr:   "selector label",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := bindsPolicyToPod(boundPolicyPod(tt.policyNS, tt.jobNS, tt.selector, labels))
+			if tt.substr == "" {
+				if err != nil {
+					t.Fatalf("bindsPolicyToPod() = %v, want nil for a correctly bound pair", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("bindsPolicyToPod() = nil; a policy that does not apply to the pod would leave the agent with unrestricted egress")
+			}
+			if !strings.Contains(err.Error(), tt.substr) {
+				t.Errorf("error %q does not name the axis that drifted (want it to mention %q)", err, tt.substr)
+			}
+		})
+	}
+}
+
+// TestSecurity_NetworkPolicyLandsInThePodsNamespace asserts the binding as an
+// observable property of the rendered output, for every shape Render emits.
+//
+// TestRender_NetworkPolicySelectorMatchesPod checks the label half. This is the
+// half it does not: a NetworkPolicy only ever restricts pods in its own
+// namespace, so a policy rendered anywhere but the Job's namespace is inert,
+// and every other assertion in this package still passes.
+func TestSecurity_NetworkPolicyLandsInThePodsNamespace(t *testing.T) {
+	// Every case names a DIFFERENT namespace, so the field under test varies in
+	// all of them rather than only in the one that says so.
+	imageSpec := validSpec()
+	imageSpec.Namespace = "team-a-agents"
+	imageSpec.WorkspaceTransport = WorkspaceFromImage
+	imageSpec.ImageWorkspacePath = "/andbo/workspace"
+
+	hardened := validSpec()
+	hardened.Namespace = "ci-agent-runs"
+	hardened.ServiceAccountName = "andbo-agent"
+	hardened.RuntimeClassName = "gvisor"
+
+	// "kube" is one character short of the reserved kube- prefix, and "andbo"
+	// is the shortest namespace the CLI's own examples produce.
+	edge := validSpec()
+	edge.Namespace = "kube"
+
+	tests := []struct {
+		name string
+		spec JobSpec
+	}{
+		{"empty transport", validSpec()},
+		{"image transport", imageSpec},
+		{"optional hardening fields", hardened},
+		{"namespace that skirts the reserved prefix", edge},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.spec
+			got, err := s.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil", err)
+			}
+			d := docs(t, got)
+			if len(d) != 2 {
+				t.Fatalf("expected 2 documents, got %d", len(d))
+			}
+
+			policyNS := dig(t, d[0], "metadata", "namespace")
+			jobNS := dig(t, d[1], "metadata", "namespace")
+			if policyNS == "" {
+				t.Fatal("NetworkPolicy has no metadata.namespace: applied with `kubectl apply -f -` it would land in whatever namespace the operator's context names, not the Job's")
+			}
+			if policyNS != jobNS {
+				t.Errorf("NetworkPolicy namespace %v != Job namespace %v; a NetworkPolicy restricts only pods in its own namespace, so this one would deny the agent nothing", policyNS, jobNS)
+			}
+			if jobNS != s.Namespace {
+				t.Errorf("Job namespace %v != spec namespace %q", jobNS, s.Namespace)
+			}
+		})
+	}
+}

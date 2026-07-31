@@ -178,14 +178,6 @@ func (s JobSpec) Render() (string, error) {
 
 	podLabels := s.jobLabels()
 	selector := s.selectorLabels()
-	// Defence in depth: if the selector and the pod labels ever drift apart the
-	// NetworkPolicy silently stops applying and the pod gets unrestricted
-	// egress. Fail rendering rather than emit a policy that matches nothing.
-	for k, v := range selector {
-		if podLabels[k] != v {
-			return "", fmt.Errorf("internal error: NetworkPolicy selector label %q=%q is not on the Job pod template; refusing to render a policy that would not apply", k, v)
-		}
-	}
 
 	np := networkPolicy{
 		APIVersion: "networking.k8s.io/v1",
@@ -290,7 +282,66 @@ func (s JobSpec) Render() (string, error) {
 		},
 	}
 
+	// Defence in depth, and the last thing checked before encoding.
+	if err := bindsPolicyToPod(np, j); err != nil {
+		return "", err
+	}
+
 	return encodeDocs(np, j)
+}
+
+// bindsPolicyToPod reports whether the rendered NetworkPolicy would actually
+// restrict the rendered Job's pod.
+//
+// Kubernetes applies a NetworkPolicy to a pod on TWO conditions, and both fail
+// silently:
+//
+//   - The policy is in the POD'S NAMESPACE. NetworkPolicy is a namespaced
+//     object with no cross-namespace form — podSelector selects inside the
+//     policy's own namespace only — so a policy that lands anywhere else
+//     restricts nothing here. A missing namespace is the same failure by
+//     another route: piped into `kubectl apply -f -`, an object without one
+//     goes to whatever namespace the operator's context names.
+//   - podSelector matches the POD TEMPLATE's labels, which are not the Job's
+//     own metadata labels.
+//
+// Either way the manifest is valid, still reads as a default-deny, and applies
+// without complaint — `kubectl apply -f -` with no -n takes each document's own
+// namespace and never compares them — while the agent has unrestricted egress.
+// That is the one outcome this package exists to prevent, so drift on either
+// axis fails the render rather than emitting a policy that would not apply.
+//
+// It reads the CONSTRUCTED objects rather than the values that fed them, so an
+// edit anywhere between building them and encoding them still has to leave the
+// two bound. The bound on that: no test can prove this function was CALLED —
+// deleting the call site changes no output, so nothing fails. What is testable
+// is the property itself, which
+// TestSecurity_NetworkPolicyLandsInThePodsNamespace pins on the rendered
+// manifest, guard or no guard.
+func bindsPolicyToPod(np networkPolicy, j job) error {
+	switch {
+	case np.Metadata.Namespace == "" && j.Metadata.Namespace == "":
+		// Both would land in the operator's context namespace, so these two do
+		// still bind and egress is still denied. The loss is different and must
+		// be reported as itself: the manifest no longer says WHERE the run is
+		// confined, so the namespace Validate ran its reserved-namespace checks
+		// against is not the one this would be applied to, and `kubectl apply
+		// -n` could put the pair beside the control-plane workloads those
+		// checks exist to refuse.
+		return fmt.Errorf("internal error: neither the NetworkPolicy %q nor its Job names a namespace, so the manifest does not state where the run is confined and would be applied to whichever namespace the operator's kubectl context or -n flag names — not the one this spec was validated against; refusing to render it", np.Metadata.Name)
+	case np.Metadata.Namespace == "":
+		return fmt.Errorf("internal error: NetworkPolicy %q names no namespace while its Job is in %q, so applying the manifest would place the policy wherever the operator's kubectl context points and the two would bind only by coincidence; refusing to render a policy that would leave the agent with unrestricted egress", np.Metadata.Name, j.Metadata.Namespace)
+	case np.Metadata.Namespace != j.Metadata.Namespace:
+		return fmt.Errorf("internal error: NetworkPolicy %q is in namespace %q but its Job is in %q, and a NetworkPolicy restricts only pods in its own namespace; refusing to render a policy that would leave the agent with unrestricted egress", np.Metadata.Name, np.Metadata.Namespace, j.Metadata.Namespace)
+	}
+
+	podLabels := j.Spec.Template.Metadata.Labels
+	for k, v := range np.Spec.PodSelector.MatchLabels {
+		if podLabels[k] != v {
+			return fmt.Errorf("internal error: NetworkPolicy selector label %q=%q is not on the Job pod template; refusing to render a policy that would not apply", k, v)
+		}
+	}
+	return nil
 }
 
 // resources and containerSecurityContext are shared by the agent container and
