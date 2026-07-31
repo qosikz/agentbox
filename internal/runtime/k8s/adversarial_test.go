@@ -48,11 +48,21 @@ var (
 	// rather than a caller input, so any other value is drift. Checked wherever
 	// they appear, for the same reason the lists above are: a weakened value
 	// must not be able to hide in a structure the top-level assertions do not
-	// walk into. Presence is checked separately (see assertContainersRePull) —
-	// this list can only speak for keys that were rendered.
+	// walk into.
+	//
+	// This list can only speak for keys that were RENDERED: a field that
+	// disappears passes it, and for every key here absence is itself a
+	// weakening, since the API server then supplies a default (backoffLimit 6,
+	// restartPolicy Always, completions nil under an explicit parallelism).
+	// Presence is asserted by the named property tests in
+	// manifest_contract_test.go, not here. The container check below is the
+	// exception that does its own presence assertion inline, because it has to
+	// reach containers in lists that do not exist yet.
 	mustEqual = map[string]any{
-		"parallelism": 1,
-		"completions": 1,
+		"parallelism":   1,
+		"completions":   1,
+		"backoffLimit":  0,
+		"restartPolicy": "Never",
 	}
 )
 

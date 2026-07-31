@@ -203,9 +203,12 @@ func (s JobSpec) Render() (string, error) {
 		},
 		Spec: jobSpec{
 			// No retries: an agent run has side effects (commits, PRs, tool
-			// calls), so a retry would repeat them. This is not at-most-once
-			// execution — node failure or pod deletion can still start the run
-			// twice (see EnforcementNotes).
+			// calls), so a retry would repeat them. This bounds the JOB
+			// controller only, and holds only because RestartPolicy below is
+			// Never — an in-place container restart is not a pod failure and
+			// never consumes this. Neither is at-most-once execution: node
+			// failure or pod deletion can still start the run twice (see
+			// EnforcementNotes and retriesNothingAfterFailure).
 			BackoffLimit:            0,
 			Completions:             1,
 			Parallelism:             1,
@@ -214,6 +217,10 @@ func (s JobSpec) Render() (string, error) {
 			Template: podTemplate{
 				Metadata: templateMeta{Labels: podLabels},
 				Spec: podSpec{
+					// The kubelet's half of the no-retry contract: OnFailure
+					// would restart the agent container in place, on the same
+					// workspace, without the Job controller ever counting a pod
+					// failure against BackoffLimit above.
 					RestartPolicy:                "Never",
 					AutomountServiceAccountToken: false,
 					// Drops the per-namespace Service variables. It does NOT
@@ -287,6 +294,9 @@ func (s JobSpec) Render() (string, error) {
 		return "", err
 	}
 	if err := runsOnePodWithFreshImages(j); err != nil {
+		return "", err
+	}
+	if err := retriesNothingAfterFailure(j); err != nil {
 		return "", err
 	}
 

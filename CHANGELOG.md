@@ -78,6 +78,24 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **Kubernetes renderer: `backoffLimit: 0` was documented as if it stopped
+  retries on its own, and nothing enforced the `restartPolicy: Never` it
+  actually depends on.** The two fields are one control on two axes: the Job
+  controller creates replacement *pods* up to `backoffLimit`, while the kubelet
+  restarts the failed *container* in place under `restartPolicy: OnFailure` —
+  and an in-place restart is not a pod failure, so it never consumes
+  `backoffLimit`. `OnFailure` alongside `backoffLimit: 0` would restart the
+  agent repeatedly on the same half-written workspace while the manifest still
+  read as no-retries. Both values are now refused at render time by
+  `retriesNothingAfterFailure`, so a future edit that makes either field
+  caller-supplied fails the render instead of emitting a manifest that re-runs
+  an agent which has already committed and pushed. Previously they were pinned
+  only by the byte-for-byte goldens (which `-update` rewrites) and a single
+  assertion on one spec; they are now asserted by name, for presence as well as
+  value, across every workspace transport — absence matters because the API
+  server defaults an omitted `backoffLimit` to **6**. The enforcement note now
+  states the pairing and keeps the existing bound that neither field gives
+  at-most-once execution.
 - **Kubernetes renderer: the reserved-namespace guard only knew the prefix
   Kubernetes reserves, so every namespace a privileged add-on owns rendered
   clean.** `--namespace cert-manager`, `kyverno`, `gatekeeper-system`,

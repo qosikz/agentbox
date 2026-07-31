@@ -235,6 +235,149 @@ func TestRunsOnePodWithFreshImages(t *testing.T) {
 	}
 }
 
+// TestSecurity_NeitherControllerNorKubeletRetriesTheAgent pins the two fields
+// that together decide whether a failed agent run is repeated.
+//
+// They are one control on two axes, and each is useless alone:
+//
+//   - spec.backoffLimit bounds how many replacement PODS the Job controller
+//     creates after a pod fails. Absence is a weakening, not a neutral: the API
+//     server defaults it to 6, so a dropped field is six more runs.
+//   - spec.template.spec.restartPolicy decides whether the KUBELET restarts the
+//     failed CONTAINER in place — same pod, same volumes, same workspace. An
+//     in-place restart is not a pod failure, so the Job controller never counts
+//     it: under OnFailure the agent is restarted again and again while
+//     backoffLimit 0 sits there unconsumed, and the manifest still reads as
+//     no-retries. Absence is worse than a wrong value, because the pod default
+//     is Always, which the API server rejects outright for a Job template — the
+//     run then never starts at all.
+//
+// Both are asserted PRESENT as well as equal, for those two reasons and for the
+// same contract reason as completions and parallelism above: a reviewer should
+// not have to know an API default to know whether a manifest re-runs an agent
+// that has already pushed a commit.
+func TestSecurity_NeitherControllerNorKubeletRetriesTheAgent(t *testing.T) {
+	for name, spec := range transportSpecs(t) {
+		t.Run(name, func(t *testing.T) {
+			manifest, err := spec.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil", err)
+			}
+			job := docs(t, manifest)[1]
+
+			jobSpec, ok := dig(t, job, "spec").(map[string]any)
+			if !ok {
+				t.Fatal("job spec is not a mapping")
+			}
+			switch v, present := jobSpec["backoffLimit"]; {
+			case !present:
+				t.Error("spec.backoffLimit is not rendered; the API server then defaults it to 6, so a failed run is retried six more times with every side effect it already committed")
+			case v != 0:
+				t.Errorf("spec.backoffLimit = %v, want 0; above 0 the Job controller replaces a failed pod and repeats the run's commits, pushes, and tool calls", v)
+			}
+
+			pod, ok := dig(t, job, "spec", "template", "spec").(map[string]any)
+			if !ok {
+				t.Fatal("job spec.template.spec is not a mapping")
+			}
+			switch v, present := pod["restartPolicy"]; {
+			case !present:
+				t.Error("restartPolicy is not rendered; the pod default is Always, which the API server rejects for a Job template, so the run would never start")
+			case v != "Never":
+				t.Errorf("restartPolicy = %v, want Never; under OnFailure the kubelet restarts the agent container in place on the same workspace, which is not a pod failure and so never consumes backoffLimit", v)
+			}
+		})
+	}
+}
+
+// TestRetriesNothingAfterFailure exercises the render-time guard directly, on
+// constructed Jobs the public API cannot produce. It is what makes the property
+// enforceable rather than merely asserted: a future edit that makes either field
+// caller-supplied, or that drops one of them, fails the render instead of
+// emitting a manifest that runs the agent again.
+func TestRetriesNothingAfterFailure(t *testing.T) {
+	ok := func() job {
+		return job{Spec: jobSpec{
+			BackoffLimit: 0,
+			Template:     podTemplate{Spec: podSpec{RestartPolicy: "Never"}},
+		}}
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*job)
+		// substr must appear in the error. The guard fuses two fields owned by
+		// two different controllers, so an unattributable "internal error" would
+		// leave a maintainer unable to tell a Job-controller retry from a
+		// kubelet one. Empty means the Job is hardened and must pass.
+		substr string
+	}{
+		{name: "hardened", mutate: func(*job) {}},
+		{name: "one retry", mutate: func(j *job) { j.Spec.BackoffLimit = 1 }, substr: "backoffLimit=1"},
+		{name: "the api default", mutate: func(j *job) { j.Spec.BackoffLimit = 6 }, substr: "backoffLimit=6"},
+		{name: "negative retries", mutate: func(j *job) { j.Spec.BackoffLimit = -1 }, substr: "backoffLimit=-1"},
+		{
+			name:   "kubelet restarts the container in place",
+			mutate: func(j *job) { j.Spec.Template.Spec.RestartPolicy = "OnFailure" },
+			substr: `restartPolicy "OnFailure"`,
+		},
+		{
+			name:   "kubelet restarts it unconditionally",
+			mutate: func(j *job) { j.Spec.Template.Spec.RestartPolicy = "Always" },
+			substr: `restartPolicy "Always"`,
+		},
+		{
+			name:   "the field was dropped",
+			mutate: func(j *job) { j.Spec.Template.Spec.RestartPolicy = "" },
+			substr: "restartPolicy",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := ok()
+			tt.mutate(&j)
+
+			err := retriesNothingAfterFailure(j)
+			if tt.substr == "" {
+				if err != nil {
+					t.Fatalf("retriesNothingAfterFailure() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("retriesNothingAfterFailure() = nil, want a refusal")
+			}
+			if !strings.Contains(err.Error(), tt.substr) {
+				t.Errorf("error does not name what drifted (want %q):\n%v", tt.substr, err)
+			}
+		})
+	}
+}
+
+// TestSecurity_NoRetryBoundsAreStated keeps the no-retry claim from being read
+// as at-most-once execution, and keeps the two fields from being documented as
+// if either one carried the property on its own.
+//
+// It asserts the LIMITING clauses, not the topic words, for the reason spelled
+// out on TestSecurity_OnePodAndFreshImageBoundsAreStated: matching on
+// "backoffLimit" would pass against a note that says backoffLimit 0 guarantees
+// the agent runs at most once, which is the exact overclaim this test exists to
+// prevent.
+func TestSecurity_NoRetryBoundsAreStated(t *testing.T) {
+	notes := strings.ToLower(strings.Join(validSpec().EnforcementNotes(), "\n"))
+
+	for _, want := range []struct{ topic, substr string }{
+		{"the two fields are one control", "only correct together"},
+		{"an in-place container restart never consumes backoffLimit", "not a pod failure"},
+		{"no-retry is not at-most-once execution", "neither is at-most-once execution"},
+	} {
+		if !strings.Contains(notes, want.substr) {
+			t.Errorf("enforcement notes do not state the bound %q (looking for %q):\n%s", want.topic, want.substr, notes)
+		}
+	}
+}
+
 // TestSecurity_OnePodAndFreshImageBoundsAreStated keeps the two claims this
 // milestone adds from being read wider than they are. Both have a bound an
 // operator has to know, and an untrue reading of either is worse than no claim:
