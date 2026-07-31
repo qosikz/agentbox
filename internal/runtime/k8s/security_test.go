@@ -121,39 +121,47 @@ func TestSecurity_NamespaceLengthIsBounded(t *testing.T) {
 // Every cluster ships more of those than the three Kubernetes creates under the
 // prefix it reserves — the prefix is the reservation, not those three names.
 func TestSecurity_ReservedNamespacePrefixIsRefused(t *testing.T) {
-	refused := []string{
+	// The owner travels with each case because the error NAMES it, and a name
+	// is the one part of this error an operator acts on directly: it is who
+	// they go and audit. Stating the mapping here, independently of the table
+	// in validate.go, is what makes a one-sided edit fail.
+	refused := []struct{ ns, owner string }{
 		// The three every cluster ships.
-		"kube-system", "kube-public", "kube-node-lease",
+		{"kube-system", "Kubernetes"}, {"kube-public", "Kubernetes"}, {"kube-node-lease", "Kubernetes"},
 		// The flannel CNI installs into kube-flannel.
-		"kube-flannel",
+		{"kube-flannel", "Kubernetes"},
 		// The PREFIX is what is reserved, so the tail does not matter: these
 		// are arbitrary names under it, not namespaces known to exist.
-		"kube-apiserver", "kube-ovn", "kube-a",
-		// OpenShift reserves its own prefix the same way, and enforces it:
-		// the cluster refuses to create a project under openshift-. The tail
-		// does not matter here either.
-		"openshift-monitoring", "openshift-apiserver", "openshift-ingress", "openshift-a",
+		{"kube-apiserver", "Kubernetes"}, {"kube-ovn", "Kubernetes"}, {"kube-a", "Kubernetes"},
+		// OpenShift reserves its own prefix the same way, and enforces it: the
+		// cluster refuses to create a project under openshift-. The tail does
+		// not matter here either.
+		{"openshift-monitoring", "OpenShift"}, {"openshift-apiserver", "OpenShift"},
+		{"openshift-ingress", "OpenShift"}, {"openshift-a", "OpenShift"},
 	}
-	for _, ns := range refused {
-		t.Run("refused/"+ns, func(t *testing.T) {
+	for _, tc := range refused {
+		t.Run("refused/"+tc.ns, func(t *testing.T) {
 			s := validSpec()
-			s.Namespace = ns
+			s.Namespace = tc.ns
 
 			// Assert on Render, not Validate: Render is the only surface that
 			// produces bytes an operator can apply, so it is the one that has to
 			// refuse.
 			_, err := s.Render()
 			if err == nil {
-				t.Fatalf("Render() accepted namespace %q, want a rejection", ns)
+				t.Fatalf("Render() accepted namespace %q, want a rejection", tc.ns)
 			}
 			// Pin all three parts the project requires of an error — what
 			// failed, why, and how to fix it. Without the "additive" clause the
 			// whole reason can be deleted and only the bare assertion "this is
 			// reserved" survives, which is not something an operator can weigh.
-			for _, want := range []string{ns, "reserved", "additive", "dedicated namespace"} {
+			for _, want := range []string{tc.ns, "reserved", "additive", "dedicated namespace"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error does not contain %q, so it does not explain what failed, why, and how to fix it:\n%v", want, err)
 				}
+			}
+			if want := tc.owner + " reserves the "; !strings.Contains(err.Error(), want) {
+				t.Errorf("error does not contain %q, so it credits the reservation to the wrong platform and sends the operator to audit something that does not own this namespace:\n%v", want, err)
 			}
 		})
 	}
@@ -211,23 +219,30 @@ func TestSecurity_ReservedNamespacePrefixIsRefused(t *testing.T) {
 // "openshift" is a content namespace of shared imagestreams and templates with
 // nothing running in it. Both are still refused — they belong to a project that
 // manages what is in them — but on the reason that is true of them.
+//
+// The owner is stated here as well as in validate.go on purpose. It is the
+// part of the error an operator acts on directly — it is who they go and
+// audit — and a hand-maintained table of thirteen is exactly the shape that
+// invites a wrong mapping. Two independent statements of it mean a one-sided
+// edit fails rather than shipping a renderer that misattributes a namespace.
 var systemAddOnNamespaces = []struct {
 	ns              string
+	owner           string
 	claimsPrivilege bool
 }{
-	{"kubeflow", true},
-	{"kubernetes-dashboard", false},
-	{"calico-system", true},
-	{"tigera-operator", true},
-	{"istio-system", true},
-	{"metallb-system", true},
-	{"openshift", false},
-	{"cattle-system", true},
-	{"gatekeeper-system", true},
-	{"kyverno", true},
-	{"cert-manager", true},
-	{"ingress-nginx", true},
-	{"velero", true},
+	{"kubeflow", "Kubeflow", true},
+	{"kubernetes-dashboard", "the Kubernetes Dashboard", false},
+	{"calico-system", "Calico", true},
+	{"tigera-operator", "the Tigera operator", true},
+	{"istio-system", "Istio", true},
+	{"metallb-system", "MetalLB", true},
+	{"openshift", "OpenShift", false},
+	{"cattle-system", "Rancher", true},
+	{"gatekeeper-system", "OPA Gatekeeper", true},
+	{"kyverno", "Kyverno", true},
+	{"cert-manager", "cert-manager", true},
+	{"ingress-nginx", "the Ingress-NGINX controller", true},
+	{"velero", "Velero", true},
 }
 
 // TestSecurity_SystemAddOnNamespacesAreRefused covers the names outside every
@@ -250,10 +265,14 @@ func TestSecurity_SystemAddOnNamespacesAreRefused(t *testing.T) {
 			if err == nil {
 				t.Fatalf("Render() accepted namespace %q, want a rejection", tc.ns)
 			}
-			// What failed, why, and how to fix it.
-			for _, want := range []string{tc.ns, "belongs to", "additive", "dedicated namespace"} {
+			// What failed, why, and how to fix it. The owner is matched with
+			// the surrounding phrase rather than on its own, so the assertion
+			// still bites for cert-manager, whose owner and namespace are the
+			// same string and which a bare containment check would pass on the
+			// namespace alone.
+			for _, want := range []string{tc.ns, "belongs to " + tc.owner + ":", "additive", "dedicated namespace"} {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("error does not contain %q, so it does not explain what failed, why, and how to fix it:\n%v", want, err)
+					t.Errorf("error does not contain %q, so it does not explain what failed, who owns the namespace, why, and how to fix it:\n%v", want, err)
 				}
 			}
 
