@@ -13,40 +13,42 @@ import (
 // two agents from a cached image. These tests state the properties by name so a
 // regression fails as itself and no regeneration can absorb it.
 
-// allContainers returns every container the rendered pod would start, init
-// containers included, keyed by name.
-//
-// Init containers are not a footnote here. One runs in the same pod, on the
+// allContainers returns every container the rendered pod would start, keyed by
+// name — init containers included, because one runs in the same pod, on the
 // same volumes, from the same image reference as the agent, so a pull policy
 // that drifted there is a pull policy that drifted for the run.
+//
+// It finds containers by SHAPE — any mapping that names an image — rather than
+// by walking `initContainers` and `containers` by name. Review showed why: the
+// by-name version was blind to a container declared in a list that did not
+// exist when it was written, and a manifest carrying such a container with no
+// pull policy at all passed the whole suite once the goldens were regenerated.
+// Nothing else in this manifest carries an `image` key, so the shape is exact.
 func allContainers(t *testing.T, manifest string) map[string]map[string]any {
 	t.Helper()
-	pod, ok := dig(t, docs(t, manifest)[1], "spec", "template", "spec").(map[string]any)
+	job := docs(t, manifest)[1]
+	pod, ok := dig(t, job, "spec", "template", "spec").(map[string]any)
 	if !ok {
 		t.Fatal("job spec.template.spec is not a mapping")
 	}
-	out := map[string]map[string]any{}
-	for _, key := range []string{"initContainers", "containers"} {
-		list, present := pod[key]
-		if !present {
-			continue // initContainers is legitimately absent for the empty transport
-		}
-		items, ok := list.([]any)
-		if !ok {
-			t.Fatalf("%s is not a list, got %v", key, list)
-		}
-		for i, item := range items {
-			c, ok := item.(map[string]any)
-			if !ok {
-				t.Fatalf("%s[%d] is not a mapping", key, i)
-			}
-			name, ok := c["name"].(string)
-			if !ok {
-				t.Fatalf("%s[%d] has no name", key, i)
-			}
-			out[name] = c
-		}
+	// The agent's own list is not optional, and the shape walk below cannot say
+	// so: with initContainers rendered and containers absent, it would return a
+	// non-empty set that starts no agent.
+	if _, present := pod["containers"]; !present {
+		t.Fatal("pod renders no containers list; the agent container is not optional")
 	}
+
+	out := map[string]map[string]any{}
+	walk(job, "Job", func(path string, m map[string]any) {
+		if _, isContainer := m["image"]; !isContainer {
+			return
+		}
+		name, ok := m["name"].(string)
+		if !ok || name == "" {
+			t.Fatalf("%s names an image but has no name", path)
+		}
+		out[name] = m
+	})
 	if len(out) == 0 {
 		t.Fatal("rendered pod declares no containers")
 	}
@@ -143,7 +145,7 @@ func TestSecurity_EveryContainerRePullsItsImage(t *testing.T) {
 			for cname, c := range allContainers(t, manifest) {
 				v, present := c["imagePullPolicy"]
 				if !present {
-					t.Errorf("container %q renders no imagePullPolicy; the kubelet then defaults it to IfNotPresent for every reference except the :latest tag, so a digest-pinned run would accept the node's cached image", cname)
+					t.Errorf("container %q renders no imagePullPolicy; the API server then defaults it at pod admission to IfNotPresent for every reference but the :latest tag and the untagged form, so a digest-pinned run would accept the node's cached image", cname)
 					continue
 				}
 				if v != "Always" {

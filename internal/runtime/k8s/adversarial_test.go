@@ -51,9 +51,8 @@ var (
 	// walk into. Presence is checked separately (see assertContainersRePull) —
 	// this list can only speak for keys that were rendered.
 	mustEqual = map[string]any{
-		"imagePullPolicy": "Always",
-		"parallelism":     1,
-		"completions":     1,
+		"parallelism": 1,
+		"completions": 1,
 	}
 )
 
@@ -79,8 +78,6 @@ func walk(node any, path string, visit func(path string, m map[string]any)) {
 // is a string scalar, not a field.
 func assertHardened(t *testing.T, manifest string) {
 	t.Helper()
-
-	assertContainersRePull(t, manifest)
 
 	for _, doc := range docs(t, manifest) {
 		walk(doc, doc["kind"].(string), func(path string, m map[string]any) {
@@ -109,6 +106,18 @@ func assertHardened(t *testing.T, manifest string) {
 					t.Errorf("%s.%s = %v, must be %v", path, k, v, want)
 				}
 			}
+			// Any mapping that names an image is a container, whatever list it
+			// was declared in. Matching on SHAPE rather than on the list name is
+			// what makes this reach a container list that does not exist yet —
+			// ephemeralContainers, or whatever the next one is called. Review
+			// found the by-name version of this check blind to exactly that: a
+			// container in a new list, carrying no pull policy at all, took the
+			// whole suite green once the goldens were regenerated.
+			if _, isContainer := m["image"]; isContainer {
+				if v, present := m["imagePullPolicy"]; !present || v != "Always" {
+					t.Errorf("%s names an image but imagePullPolicy = %v (present=%v), want Always", path, v, present)
+				}
+			}
 			// Volumes may only be size-limited emptyDirs. This is what makes a
 			// hostPath / docker-socket mount structurally impossible rather
 			// than merely absent by default.
@@ -122,27 +131,6 @@ func assertHardened(t *testing.T, manifest string) {
 				}
 			}
 		})
-	}
-}
-
-// assertContainersRePull is the ABSENCE half of the imagePullPolicy invariant.
-// mustEqual only compares keys that were rendered, so it cannot speak for a
-// policy that is not in the manifest at all.
-//
-// No input reaches that state today: the field carries no omitempty, so an
-// empty policy still renders as `imagePullPolicy: ""` and mustEqual catches it.
-// This guards the drift that would change that — adding omitempty, or dropping
-// the field — which is the same class of silent weakening the rest of this
-// commit exists to close. Omission is not neutral: the API server then defaults
-// the policy at pod admission to IfNotPresent for every reference but the
-// :latest tag and the untagged form.
-func assertContainersRePull(t *testing.T, manifest string) {
-	t.Helper()
-
-	for name, c := range allContainers(t, manifest) {
-		if v, present := c["imagePullPolicy"]; !present || v != "Always" {
-			t.Errorf("container %q imagePullPolicy = %v (present=%v), want Always", name, v, present)
-		}
 	}
 }
 
