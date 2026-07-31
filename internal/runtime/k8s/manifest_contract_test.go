@@ -1,6 +1,9 @@
 package k8s
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -557,5 +560,326 @@ func TestSecurity_OnePodAndFreshImageBoundsAreStated(t *testing.T) {
 		if !strings.Contains(notes, want.substr) {
 			t.Errorf("enforcement notes do not state the bound %q (looking for %q):\n%s", want.topic, want.substr, notes)
 		}
+	}
+}
+
+// TestSecurity_WallClockCapIsDocumentedAndTrue ties MaxActiveDeadlineSeconds to
+// the figure operators are given for it.
+//
+// Every bounds assertion in this package is keyed to the constant, which is
+// right — a test that restated 86400 would just be a second copy to keep in
+// step. The cost is that the constant is then unfalsifiable from inside the
+// package: raising it to 30 days leaves the whole k8s suite green, because every
+// check moves with it. Measured on the parent commit, exactly one test in the
+// repository objects, and it lives in the CLI package.
+//
+// The README is where that is not true. It tells operators the cap in MINUTES,
+// as a flat number, and nothing connects that number to the constant — so the
+// figure someone plans a run against can silently stop being the figure the
+// renderer enforces. This is the shape
+// TestSecurity_ReservedNamespaceBoundIsDocumentedAndTrue already establishes:
+// read the claim where it is written rather than restating it.
+//
+// Failing when the sentence is REWORDED is deliberate, not brittleness. The
+// number is the claim; a rewrite that moves it is a rewrite that has to be read
+// against the constant, and a test that quietly skipped when its anchor moved
+// would defend nothing.
+func TestSecurity_WallClockCapIsDocumentedAndTrue(t *testing.T) {
+	const (
+		anchorOpen  = "`budget.max_runtime_minutes` above the "
+		anchorClose = "-minute cap"
+	)
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "README.md"))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	// Flatten first so the check does not depend on where the prose wraps.
+	flat := strings.Join(strings.Fields(string(src)), " ")
+
+	start := strings.Index(flat, anchorOpen)
+	if start < 0 {
+		t.Fatalf("README no longer states the budget.max_runtime_minutes cap in the form %q...%q; that figure is what operators size a run against, so it must be re-tied to MaxActiveDeadlineSeconds rather than left unchecked", anchorOpen, anchorClose)
+	}
+	rest := flat[start+len(anchorOpen):]
+	end := strings.Index(rest, anchorClose)
+	if end < 0 {
+		t.Fatalf("README states %q but not %q after it; cannot read the documented cap", anchorOpen, anchorClose)
+	}
+
+	documented, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		t.Fatalf("README documents the cap as %q, which is not a number: %v", rest[:end], err)
+	}
+	if want := MaxActiveDeadlineSeconds / 60; documented != want {
+		t.Errorf("README tells operators the cap is %d minutes, but MaxActiveDeadlineSeconds is %d seconds (%d minutes). One of them moved without the other, and the one operators read is the wrong one", documented, MaxActiveDeadlineSeconds, want)
+	}
+}
+
+// TestSecurity_WallClockBoundsAreStated keeps the bounded-run claim from being
+// read as "the agent stops at the deadline", which is the reading an operator
+// will take from the field name alone and the one that decides whether they
+// trust a Job's outcome.
+//
+// It asserts the LIMITING clauses, not the topic words, for the reason spelled
+// out on TestSecurity_OnePodAndFreshImageBoundsAreStated: a note that merely
+// mentions activeDeadlineSeconds passes a keyword match while promising a hard
+// stop. Each clause below is one an overclaiming rewrite could not keep.
+//
+// The phrasing is deliberately not shared with the no-retry note. Both end at
+// the same place — a Failed Job whose pod and logs are gone — but asserting the
+// no-retry note's wording here would pass even if this note dropped the point
+// entirely, since the notes are matched as one joined string.
+func TestSecurity_WallClockBoundsAreStated(t *testing.T) {
+	notes := strings.ToLower(strings.Join(validSpec().EnforcementNotes(), "\n"))
+
+	for _, want := range []struct{ topic, substr string }{
+		{"the deadline starts termination rather than ending the run", "not when the agent stops"},
+		// The size of the overrun, which is what makes it actionable: an
+		// operator who reads "terminated at 1800s" plans differently from one
+		// who reads "SIGTERM at 1800s, SIGKILL 30 seconds later".
+		{"the grace period is added to every budget", "goes on running for the pod's terminationgraceperiodseconds"},
+		{"a Job that hit its deadline is not a Job that did nothing", "is not evidence that the agent did nothing"},
+		{"the budget is per active period, not per Job", "hands the run a fresh full budget each time"},
+		{"nothing local enforces it", "nothing in andbo supervises a pod"},
+	} {
+		if !strings.Contains(notes, want.substr) {
+			t.Errorf("enforcement notes do not state the bound %q (looking for %q):\n%s", want.topic, want.substr, notes)
+		}
+	}
+}
+
+// deadlineSpecs returns transportSpecs with a distinctive budget, so an
+// assertion about the rendered deadline cannot be satisfied by a constant. The
+// value is inside the caps and is not the default, not the max, and not a round
+// number any other field in this package uses.
+func deadlineSpecs(t *testing.T) map[string]JobSpec {
+	t.Helper()
+	out := transportSpecs(t)
+	for name, s := range out {
+		s.ActiveDeadlineSeconds = 4321
+		out[name] = s
+	}
+	return out
+}
+
+// TestSecurity_TheRunHasABoundedWallClock pins spec.activeDeadlineSeconds as a
+// value with a FORM, a RANGE, and a source — not merely as a key that is
+// present.
+//
+// Nothing local supervises a rendered run. This package never contacts a
+// cluster, so there is no second timer anywhere in Andbo: the field asserted
+// here is the whole of the wall-clock bound, and whatever it fails to say, no
+// other part of this codebase says instead.
+//
+//   - PRESENCE. Absence is the sharpest failure and the one a golden diff
+//     reports most quietly. activeDeadlineSeconds is a *int64 that the API
+//     server does not default, so a field that vanishes is not a longer run but
+//     an UNBOUNDED one: the Job controller has nothing to compare a start time
+//     against and never terminates the agent. An omitempty added to a pointer,
+//     or a spec field that stops being copied, both land here.
+//   - FORM. A wall clock has exactly one rendered shape, and the two ways out
+//     of it fail in opposite directions. A quoted `"4321"` is not an integer,
+//     and the API server rejects the whole Job — the run never starts. A `null`
+//     is accepted and means no deadline at all — the run never stops. Neither
+//     is visible in a manifest that still lists the key, which is why the type
+//     is asserted rather than the key.
+//   - RANGE. Below 1 and above the cap are both refused; see
+//     TestBoundsTheRunsWallClock for what each end means.
+//   - SOURCE. The rendered value must be the value that was VALIDATED. A
+//     renderer that emitted a constant would pass a presence-and-range check
+//     while describing a run nobody asked for — the manifest would state a
+//     budget the operator did not choose, and the operator has no other place
+//     to read it from. deadlineSpecs supplies a value that is not the default
+//     precisely so a constant cannot pass.
+func TestSecurity_TheRunHasABoundedWallClock(t *testing.T) {
+	for name, spec := range deadlineSpecs(t) {
+		t.Run(name, func(t *testing.T) {
+			manifest, err := spec.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil", err)
+			}
+
+			jobSpec, ok := dig(t, docs(t, manifest)[1], "spec").(map[string]any)
+			if !ok {
+				t.Fatal("job spec is not a mapping")
+			}
+
+			raw, present := jobSpec["activeDeadlineSeconds"]
+			if !present {
+				t.Fatal("spec.activeDeadlineSeconds is not rendered; the API server defaults no deadline, so the Job controller never terminates the run and the agent occupies the cluster until someone notices — nothing in Andbo supervises a pod")
+			}
+			got, ok := raw.(int)
+			if !ok {
+				t.Fatalf("spec.activeDeadlineSeconds = %#v (%T), want an integer scalar; a quoted string is rejected by the API server so the run never starts, and a null means no deadline at all so it never stops", raw, raw)
+			}
+			if got < 1 || got > MaxActiveDeadlineSeconds {
+				t.Errorf("spec.activeDeadlineSeconds = %d, want within 1..%d; outside that range the manifest either fails the run at once or lets it hold the cluster longer than this package is willing to render", got, MaxActiveDeadlineSeconds)
+			}
+			if int64(got) != spec.ActiveDeadlineSeconds {
+				t.Errorf("spec.activeDeadlineSeconds = %d, want %d (the validated budget); a rendered constant would state a budget the caller never chose, and the manifest is the only place the run's bound is written down", got, spec.ActiveDeadlineSeconds)
+			}
+		})
+	}
+}
+
+// TestSecurity_NoOtherFieldCanExtendTheRunsWallClock closes the set, because a
+// correct activeDeadlineSeconds does not make a manifest wall-clock bounded: a
+// second field can extend, reset, or unhook the clock while the deadline itself
+// still renders exactly as asserted above.
+//
+// This is the third time this package has met the same defect shape, and the
+// level moves down each time: the pull-policy guard enumerated container LISTS
+// and missed a new one; retriesNothingAfterFailure enumerates Job FIELDS and
+// cannot see one that is not in the struct. Both closures live at Job.spec and
+// on containers. The POD SPEC between them — Job.spec.template.spec — is closed
+// by nothing today, and it is exactly where the wall clock leaks.
+//
+// The two levels, and what each does to the clock:
+//
+//   - POD SPEC. terminationGracePeriodSeconds is the one that ADDS time. When
+//     the deadline is exceeded the Job controller deletes the pods, and it
+//     passes no grace-period override, so the kubelet allows the pod's own
+//     grace period between SIGTERM and SIGKILL. This renderer sets no such
+//     field, which is why the agent gets the 30-second default rather than an
+//     arbitrary one — a value here is added to every budget this package
+//     renders, and the field looks like ordinary politeness towards a
+//     shutting-down process. A pod-level activeDeadlineSeconds is the near
+//     miss: it is a real PodSpec field the kubelet enforces on its own, so a
+//     reviewer reading one at this level would reasonably assume it is the
+//     Job's — it is not, and a larger value there does not raise the Job's
+//     bound while a smaller one silently lowers it.
+//
+//   - JOB SPEC. The set is the same six the no-retry closure names, and it is
+//     restated rather than shared on purpose: adding a Job field must force a
+//     decision about EACH contract it can break, and the two contracts fail on
+//     different fields. suspend STOPS and RESETS this one — pastActiveDeadline
+//     returns false outright while a Job is suspended, and resuming sets
+//     status.startTime to the resume moment, which is where the deadline is
+//     measured from, so a suspend/resume cycle hands the agent a fresh full
+//     budget as many times as it is repeated. managedBy makes it ADVISORY:
+//     syncJob returns early for a Job the built-in controller does not own, and
+//     nothing else here enforces a deadline. Neither is anything the no-retry
+//     closure would fail on for the reason that matters here.
+//
+// A legitimate future grace period, or a deliberate pod-level deadline, fails
+// this test. That is the intended cost: both change what "bounded" means for
+// every rendered run, and neither should become renderable without someone
+// re-deciding the contract in this file.
+func TestSecurity_NoOtherFieldCanExtendTheRunsWallClock(t *testing.T) {
+	// Exactly the fields jobSpec declares, re-decided for the wall clock.
+	allowedOnJobSpec := map[string]bool{
+		"backoffLimit":            true,
+		"completions":             true,
+		"parallelism":             true,
+		"activeDeadlineSeconds":   true,
+		"ttlSecondsAfterFinished": true,
+		"template":                true,
+	}
+
+	// Exactly the fields podSpec declares. Three of them render only when set
+	// (serviceAccountName, runtimeClassName, initContainers); this check is
+	// one-directional, so their absence is not a failure here.
+	allowedOnPodSpec := map[string]bool{
+		"restartPolicy": true, "automountServiceAccountToken": true,
+		"enableServiceLinks": true, "dnsPolicy": true, "dnsConfig": true,
+		"hostNetwork": true, "hostPID": true, "hostIPC": true,
+		"serviceAccountName": true, "runtimeClassName": true,
+		"securityContext": true, "initContainers": true,
+		"containers": true, "volumes": true,
+	}
+
+	for name, spec := range deadlineSpecs(t) {
+		t.Run(name, func(t *testing.T) {
+			manifest, err := spec.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil", err)
+			}
+			job := docs(t, manifest)[1]
+
+			jobSpec, ok := dig(t, job, "spec").(map[string]any)
+			if !ok {
+				t.Fatal("job spec is not a mapping")
+			}
+			for field := range jobSpec {
+				if !allowedOnJobSpec[field] {
+					t.Errorf("spec.%s is rendered and is not part of the wall-clock contract; a Job field outside this set can reset the clock activeDeadlineSeconds starts (suspend resets status.startTime on resume, and the deadline is measured from it) or take enforcement away from the Job controller entirely (managedBy). Decide what it does to the run's bound, then add it to this set", field)
+				}
+			}
+
+			pod, ok := dig(t, job, "spec", "template", "spec").(map[string]any)
+			if !ok {
+				t.Fatal("job spec.template.spec is not a mapping")
+			}
+			for field := range pod {
+				if !allowedOnPodSpec[field] {
+					t.Errorf("spec.template.spec.%s is rendered and is not part of the wall-clock contract; a pod field outside this set is added to every budget this package renders (terminationGracePeriodSeconds is the whole time between the SIGTERM the deadline triggers and the SIGKILL that follows it) or bounds something other than what it appears to (a pod-level activeDeadlineSeconds is the kubelet's, not the Job's). Decide what it does to the run's bound, then add it to this set", field)
+				}
+			}
+		})
+	}
+}
+
+// TestBoundsTheRunsWallClock exercises the render-time guard directly, on
+// constructed Jobs the public API cannot produce. It is what makes the property
+// enforceable rather than merely asserted: a future edit that stops copying the
+// validated budget, or that introduces a caller path around Validate, fails the
+// render instead of emitting a manifest with no usable bound.
+//
+// The two ends of the range fail differently and the messages must not be
+// interchangeable:
+//
+//   - 0 is INSIDE what the API server accepts for a Job (batch validation asks
+//     only that the value be nonnegative, unlike the pod-level field of the same
+//     name, which must be positive) and outside what this contract allows. It
+//     does not mean "no deadline" — that is what absence means — it means the
+//     Job is past its deadline the first time the controller evaluates it, so
+//     the run is failed rather than performed. A budget that cannot be spent is
+//     not a bound.
+//   - Above the cap the manifest is still valid Kubernetes; what it describes is
+//     a run holding a cluster for longer than this package is willing to render
+//     with nothing local watching it.
+//
+// "Dropped" is not claimed. ActiveDeadlineSeconds is a non-pointer int64, so a
+// field that vanishes from the YAML still reads as 0 here and is refused for the
+// wrong reason. Rendered ABSENCE is caught by
+// TestSecurity_TheRunHasABoundedWallClock, which is the test that can tell the
+// two apart.
+func TestBoundsTheRunsWallClock(t *testing.T) {
+	tests := []struct {
+		name     string
+		deadline int64
+		// substr must appear in the error, so a maintainer can tell which end of
+		// the range was hit. Empty means the Job is bounded and must pass.
+		substr string
+	}{
+		{name: "the default budget", deadline: DefaultActiveDeadlineSeconds},
+		{name: "one second", deadline: 1},
+		{name: "the cap itself", deadline: MaxActiveDeadlineSeconds},
+		{name: "zero is not the absence of a deadline", deadline: 0, substr: "activeDeadlineSeconds=0"},
+		{name: "negative", deadline: -1, substr: "activeDeadlineSeconds=-1"},
+		{name: "one past the cap", deadline: MaxActiveDeadlineSeconds + 1, substr: "exceeds the"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := job{
+				Metadata: objectMeta{Name: "fix-tests"},
+				Spec:     jobSpec{ActiveDeadlineSeconds: tt.deadline},
+			}
+
+			err := boundsTheRunsWallClock(j)
+			if tt.substr == "" {
+				if err != nil {
+					t.Fatalf("boundsTheRunsWallClock() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("boundsTheRunsWallClock() = nil, want a refusal")
+			}
+			if !strings.Contains(err.Error(), tt.substr) {
+				t.Errorf("error does not say which end of the range was hit (want %q):\n%v", tt.substr, err)
+			}
+		})
 	}
 }

@@ -78,6 +78,40 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **Kubernetes renderer: `activeDeadlineSeconds` was a value nothing checked once
+  it had been rendered, and the level below it was closed by nothing.** The
+  rendered manifest is unchanged and always carried a bounded deadline; this
+  hardens what holds it there. The budget is now refused at render time outside
+  `1..86400`: `0` is not "no deadline" but a deadline already spent — the API
+  server admits it for a Job, since batch validation asks only that the value be
+  nonnegative, while the pod-level field of the same name must be positive — and
+  `pastActiveDeadline` compares with `>=`, so the Job is failed the first time
+  the controller evaluates it. The rendered value is asserted at the renderer,
+  across both workspace transports, for **presence** (absent is not a longer run
+  but an unbounded one, because the API server defaults no deadline), **form** (a
+  quoted string is rejected by the API server so the run never starts; a `null`
+  means it never stops), **range**, and **provenance** — a rendered constant
+  would state a budget the caller never chose, and the manifest is the only place
+  a run's bound is written down. Those four were previously checked only from the
+  `andbo k8s render` side, on CLI-produced manifests, against a literal `86400`
+  rather than the package's own cap.
+
+  The hole underneath them was `Job.spec.template.spec`, which no test closed:
+  `terminationGracePeriodSeconds` is *added* to every budget this renderer emits,
+  since the Job controller deletes pods through a call that carries no delete
+  options at all. Measured on the parent commit, rendering a 3600-second grace
+  period failed exactly three tests, all of them golden — and
+  `go test ./internal/runtime/k8s -update` then took the whole repository green
+  on a manifest where every run overruns its stated budget by an hour.
+
+  The enforcement note now states that the deadline is when the cluster *begins*
+  ending the run and not when the agent stops, that the agent goes on running for
+  the 30-second grace period afterwards — long enough for a commit or push
+  already under way to finish — that a `DeadlineExceeded` Job with its pod and
+  logs deleted is **not** evidence the agent did nothing, that suspending and
+  resuming a Job hands the run a fresh full budget each time, and that a Job
+  reconciled by another controller through `managedBy` has no deadline applied
+  at all.
 - **Kubernetes renderer: nothing enforced the no-retry contract at render time.**
   The rendered manifest is unchanged and always carried `backoffLimit: 0` with
   `restartPolicy: Never`; this hardens what holds them there. Both are now
