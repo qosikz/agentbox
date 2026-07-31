@@ -456,7 +456,9 @@ required CPU/memory requests and limits, `HOME` pointed at the writable volume
 (the root filesystem is read-only), `completions: 1` with `parallelism: 1`,
 `backoffLimit: 0` with `restartPolicy: Never`, and
 `imagePullPolicy: Always` on **every** container the pod starts (the agent's and,
-with `--workspace image:/path`, the init container's), plus a bounded
+with `--workspace image:/path`, the init container's), exactly **one** agent
+container — with `--workspace image:/path` the one init container that copies the
+workspace in, and nothing else — plus a bounded
 `ttlSecondsAfterFinished` and `activeDeadlineSeconds` — the latter from
 `budget.max_runtime_minutes`, or 1800s when that is `0`. (`andbo run` reads `0`
 as "no deadline"; a pod nobody is supervising always gets one. A negative is not
@@ -493,7 +495,14 @@ update path ends in an immutability check on it, so neither can be changed on a
 live Job at all. `completions: 1` is held by a longer route — the update path
 lets `completions` move only for an `Indexed` Job, Andbo emits no
 `completionMode` so the API server stores `NonIndexed`, and `completionMode` is
-itself immutable, so this Job cannot become `Indexed` later.
+itself immutable, so this Job cannot become `Indexed` later. The **container
+lists** ride in that same pod template, so nobody edits a sidecar into a live
+Job — but that holds the *Job*, not the *pod*. An **ephemeral container** is
+added through the pod's own `ephemeralcontainers` subresource rather than through
+the template (`kubectl debug` is the usual route), so it never meets that
+immutability at all: it attaches to the running pod, shares its network
+namespace, and **cannot be removed once added**. No rendered manifest can refuse
+that — namespace RBAC on `pods/ephemeralcontainers` is where it is refused.
 
 **Not held: `backoffLimit: 0` and `parallelism: 1`.** Raising `backoffLimit` is
 the direct route: the controller compares the new value on its next sync, so the
