@@ -812,6 +812,58 @@ func TestSecurity_WallClockCapIsDocumentedAndTrue(t *testing.T) {
 	}
 }
 
+// TestSecurity_ReadmeSaysTheImmutableListIsPartial keeps a partial list from
+// being read as the list.
+//
+// Both documents name the same six fields, and only one of them carried the
+// qualifier. EnforcementNotes says the six are "the immutable SPEC FIELDS, not
+// everything the update path checks" — pinned below by
+// TestSecurity_WallClockBoundsAreStated — while the README's parallel sentence
+// said "the update validation's immutability checks name" them and stopped. That
+// is not a smaller version of the same claim, it is a different one: a
+// README-only reader concludes the pod template is editable on a live Job, which
+// is the opposite of what the paragraph three above it tells them about
+// `restartPolicy`. Verified against upstream: `ValidateJobSpecUpdate` calls
+// `ValidateImmutableField` on exactly those six, and separately calls
+// `validatePodTemplateUpdate`, `validateCompletions` and
+// `validateJobSchedulingUpdate`.
+//
+// The named HELPERS are what this asserts, not the shape of the sentence. A
+// rewrite is free to say it differently; what it may not do is drop the fact
+// that the six are one of several checks, and a helper name is the smallest
+// thing that cannot survive that drop. The six-name list is the anchor rather
+// than an assertion, so this fails loudly if the passage moves instead of
+// quietly passing on a README that no longer contains it.
+func TestSecurity_ReadmeSaysTheImmutableListIsPartial(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "README.md"))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	flat := strings.Join(strings.Fields(string(src)), " ")
+
+	const anchor = "`selector`, `completionMode`, `podFailurePolicy`, `backoffLimitPerIndex`, `managedBy` and `successPolicy`"
+	start := strings.Index(flat, anchor)
+	if start < 0 {
+		t.Fatalf("README no longer lists the six immutable Job spec fields; that list is what an operator reads to decide which parts of a reviewed manifest survive being applied, so it must be re-tied to its qualifier rather than left unchecked")
+	}
+
+	// The passage, not the whole file: a qualifier somewhere else in the README
+	// does not correct this sentence for the person reading this sentence.
+	rest := flat[start:]
+	if len(rest) > 700 {
+		rest = rest[:700]
+	}
+	for _, want := range []struct{ topic, substr string }{
+		{"the list is the immutable spec fields and not the whole update path", "not* everything the update path holds"},
+		{"the pod template is pinned by a separate call", "validatePodTemplateUpdate"},
+		{"completions is pinned by a separate call", "validateCompletions"},
+	} {
+		if !strings.Contains(rest, want.substr) {
+			t.Errorf("the README passage listing the six immutable spec fields does not state %s (looking for %q). Without it the six read as the whole of what the update path holds, and the pod template — which holds restartPolicy and imagePullPolicy — reads as editable on a live Job:\n%s", want.topic, want.substr, rest)
+		}
+	}
+}
+
 // TestSecurity_WallClockBoundsAreStated keeps the bounded-run claim from being
 // read as "the agent stops at the deadline", which is the reading an operator
 // will take from the field name alone and the one that decides whether they

@@ -323,6 +323,14 @@ func (s JobSpec) Render() (string, error) {
 	if err := boundsTheRunsWallClock(j); err != nil {
 		return "", err
 	}
+	// Last, because the guards above say more about a missing namespace than
+	// this one can, and a metadata refusal must not mask theirs.
+	if err := carriesIdentityOnlyMetadata("NetworkPolicy", np.Metadata); err != nil {
+		return "", err
+	}
+	if err := carriesIdentityOnlyMetadata("Job", j.Metadata); err != nil {
+		return "", err
+	}
 
 	return encodeDocs(np, j)
 }

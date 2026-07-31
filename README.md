@@ -557,10 +557,16 @@ the finalizer mechanism above that deletion counts as nothing: the Job takes a
 to that moment and creates a fresh pod. So a suspend/resume cycle hands the run a
 full new budget *and* starts the agent over — an unbounded extension, repeatable.
 The second way is simply more direct: `activeDeadlineSeconds` is **mutable on a
-live Job** — the update validation's immutability checks name `selector`,
-`completionMode`, `podFailurePolicy`, `backoffLimitPerIndex`, `managedBy` and
-`successPolicy`, and not this one — so the number can be raised without even
-restarting the agent. The budget in the manifest you reviewed is the budget at
+live Job** — the update validation's `ValidateImmutableField` calls name
+`selector`, `completionMode`, `podFailurePolicy`, `backoffLimitPerIndex`,
+`managedBy` and `successPolicy`, and not this one — so the number can be raised
+without even restarting the agent. Read that list as what it is: the immutable
+**spec fields**, and *not* everything the update path holds. `ValidateJobSpecUpdate`
+also calls `validatePodTemplateUpdate`, `validateCompletions` and
+`validateJobSchedulingUpdate`, which is why `restartPolicy` and `completions`
+above are held while this field is not — a reader who took the six names for the
+whole of it would conclude the pod template was editable on a live Job, and it is
+not. The budget in the manifest you reviewed is the budget at
 apply time, not for the life of the run. And enforcement is entirely the
 cluster's: nothing in Andbo supervises a pod, so a Job reconciled by another
 controller through `managedBy` gets no deadline applied at all.

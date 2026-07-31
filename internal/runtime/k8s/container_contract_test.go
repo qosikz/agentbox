@@ -99,7 +99,13 @@ func containerLists(t *testing.T) map[string]struct {
 //   - A second entry in `containers` runs CONCURRENTLY with the agent for the
 //     pod's whole life, and it decides the outcome of the run in both
 //     directions. In the kubelet's getPhase, `case running > 0 && unknown == 0:
-//     return v1.PodRunning` is evaluated BEFORE every terminal case, so a
+//     return v1.PodRunning` is evaluated BEFORE every terminal case IN THAT
+//     SWITCH — the qualifier is load-bearing, because getPhase does have one
+//     terminal return ahead of the switch, `failedInitialization > 0 &&
+//     spec.RestartPolicy == RestartPolicyNever`, and this renderer reaches both
+//     halves of it (Never always, an init container under
+//     `--workspace image:`). It cannot apply in the case described here, since
+//     an agent that exited 0 had its init containers succeed. So a
 //     second container that does not exit holds the pod Running after the agent
 //     has exited 0 — the Job never completes and instead burns its whole
 //     activeDeadlineSeconds, ending Failed/DeadlineExceeded with the pod and its
