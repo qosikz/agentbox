@@ -30,8 +30,19 @@ type labelSelector struct {
 
 // networkPolicy carries no ingress or egress field: a NetworkPolicy that
 // selects a pod and declares both policy types without rules denies everything
-// in both directions. Adding rule fields here is the only way to punch a hole,
-// so they are absent by construction.
+// in both directions. Adding rule fields here would punch a hole — an empty
+// egress rule is the widest one available, since upstream reads an empty `to` as
+// every destination and an empty `ports` as every port — so they are absent by
+// construction, and TestSecurity_NoOtherFieldCanPunchAHoleInTheDenyAll makes
+// their arrival loud rather than latent.
+//
+// Absence is NOT the whole story, and an earlier version of this comment said it
+// was ("adding rule fields here is the only way to punch a hole"). The other way
+// needs no field at all: policyTypes is a plain slice literal in Render, a
+// NetworkPolicy restricts only the directions it names, and an emptied list is
+// defaulted by the API server to [Ingress] alone. Neither edit touches this
+// struct, and bindsPolicyToPod does not read that field — hence
+// deniesEveryDirection.
 type networkPolicy struct {
 	APIVersion string            `yaml:"apiVersion"`
 	Kind       string            `yaml:"kind"`
@@ -293,6 +304,11 @@ func (s JobSpec) Render() (string, error) {
 
 	// Defence in depth, and the last things checked before encoding.
 	if err := bindsPolicyToPod(np, j); err != nil {
+		return "", err
+	}
+	// Binding and denial are separate failures: bindsPolicyToPod passes a policy
+	// that lands on the right pod and denies it nothing.
+	if err := deniesEveryDirection(np); err != nil {
 		return "", err
 	}
 	if err := runsOnePodWithFreshImages(j); err != nil {

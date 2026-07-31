@@ -565,6 +565,26 @@ apply time, not for the life of the run. And enforcement is entirely the
 cluster's: nothing in Andbo supervises a pod, so a Job reconciled by another
 controller through `managedBy` gets no deadline applied at all.
 
+**And the `NetworkPolicy` is the least held of all of them.** Andbo renders it
+with `policyTypes: [Ingress, Egress]` and no rules, which is what makes it deny
+both directions, and a render-time guard refuses any other shape — an empty
+`policyTypes` most of all, because that is not neutral: the API server *defaults*
+an empty list to `[Ingress]` alone for a policy carrying no egress rules, so the
+one field that closes egress gets completed by the cluster into the value that
+opens it. But **a `NetworkPolicy` has no immutable fields whatever** —
+`ValidateNetworkPolicyUpdate` runs the same spec validation a create does and
+pins nothing — so every part of it can be rewritten on the live object. Adding an
+egress rule is the widest edit available (an empty `to` matches every
+destination, an empty `ports` every port), dropping `Egress` from `policyTypes`
+is the quietest, and repointing `podSelector` at labels no pod carries is a third
+route to the same place. None of them deletes anything: the policy is still
+there, still named for the run, still in the pod's namespace with the run's
+labels, so `kubectl get networkpolicy` shows exactly what you expect while the
+agent has egress. That makes it strictly quieter than the deletion already
+described above. RBAC on `networkpolicies` — the **update** verb as much as
+`delete` — is what defends the live object, and a persistent namespace-wide
+default-deny that does not depend on this one is the durable backstop.
+
 Where it fails closed instead of downgrading — all of these exit **2**:
 `network.mode` `allowlist` and `open` are **rejected** (NetworkPolicy selects by
 IP/namespace/pod, not by domain — use the container runtime for allowlisted

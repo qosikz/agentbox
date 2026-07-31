@@ -5,6 +5,63 @@ All notable changes to Andbo are documented here.
 ## Unreleased
 
 ### Added
+- **Kubernetes runner: the rendered `NetworkPolicy` is enforced to deny both
+  directions.** A new render-time guard (`deniesEveryDirection`) refuses any
+  `policyTypes` that is not exactly `[Ingress, Egress]`, and the NetworkPolicy
+  document's field set is now closed by
+  `TestSecurity_NoOtherFieldCanPunchAHoleInTheDenyAll` the way the Job's four
+  contracts already were.
+
+  This was the one contract in the package with **neither a guard nor a
+  closure**, and the gap was demonstrated rather than argued.
+  `bindsPolicyToPod` — the only NetworkPolicy guard `Render` called — checks
+  *where* the policy lands and *what* it selects, never what it **denies**: given
+  a policy with a perfect namespace and a perfect selector and a `policyTypes` of
+  `nil`, `[]`, `[Ingress]` or `[Egress]`, it returned `nil` in all four cases. And
+  adding an egress rule field to `networkPolicySpec` with `omitempty`, left unset,
+  rendered no byte and took the entire repository green — one line away from being
+  set, which is exactly the latent authorisation `assertClosed`'s third direction
+  exists for, arriving through a struct field instead of an allowed-set entry.
+
+  The rendered *value* was already pinned and that half is not overstated here:
+  dropping `Egress` from the literal in `Render` fails three goldens and
+  `TestRender_NetworkPolicyDeniesBothDirections`. What was unpinned was the
+  document's **shape**, and the shape of the assertions — the denial was checked
+  on `goldenSpec` alone, which is `DefaultJobSpec` plus a name, an image and a
+  command, so a rule rendered only for a caller who names a service account was
+  invisible. It is now asserted across every shape `Render` emits.
+
+  Why an empty `policyTypes` is the case worth naming, verified against
+  `SetDefaults_NetworkPolicy` rather than assumed: it is **not** a policy that
+  denies nothing by omission, and it is not rejected either. The API server fills
+  `len(obj.Spec.PolicyTypes) == 0` with `["Ingress"]` and appends `"Egress"` only
+  `if len(obj.Spec.Egress) != 0` — so on a rule-less deny-all, the field rendered
+  precisely to close egress is completed by the cluster into the one value that
+  opens it. Nothing in the manifest looks wrong, because the wrong value is not in
+  the manifest. This is the same defaulting hazard the `imagePullPolicy` guard
+  already refuses.
+
+  **The apply-time half does not hold at all, and that is now stated.** The
+  existing lifetime note covered *deletion*; deletion is the loud route and not
+  the only one. `ValidateNetworkPolicyUpdate` calls `ValidateImmutableField` on
+  nothing whatever — **a NetworkPolicy has no immutable fields** — where the Job
+  at least freezes its pod template. So anyone who can update it rewrites the live
+  object instead: add an egress rule (an empty one is the widest hole available,
+  since upstream reads an empty `to` as every destination and an empty `ports` as
+  every port), drop `Egress` from `policyTypes`, or repoint `podSelector` at
+  labels no pod carries. None of the three deletes anything — the object is still
+  there, still named for the run, still carrying the run's labels — so it reads as
+  present and bound in `kubectl get networkpolicy` while the agent has egress,
+  which makes it *quieter* than deletion rather than merely equivalent. Read the
+  deny-all as a property of the manifest at apply time, not of the run. RBAC on
+  `networkpolicies` (the `update` verb as much as `delete`) is what defends the
+  live object.
+
+  The `networkPolicy` type's own comment claimed "adding rule fields here is the
+  only way to punch a hole". That was an overclaim and is corrected: the other way
+  needs no field at all, since `policyTypes` is a plain slice literal in `Render`
+  and `bindsPolicyToPod` never read it.
+
 - **Kubernetes runner: the rendered Job is enforced to start exactly one agent
   container.** The pod declares one agent container, plus — with
   `--workspace image:/path` only — one init container that copies the workspace
