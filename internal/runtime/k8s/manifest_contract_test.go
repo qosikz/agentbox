@@ -1,6 +1,9 @@
 package k8s
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -557,6 +560,58 @@ func TestSecurity_OnePodAndFreshImageBoundsAreStated(t *testing.T) {
 		if !strings.Contains(notes, want.substr) {
 			t.Errorf("enforcement notes do not state the bound %q (looking for %q):\n%s", want.topic, want.substr, notes)
 		}
+	}
+}
+
+// TestSecurity_WallClockCapIsDocumentedAndTrue ties MaxActiveDeadlineSeconds to
+// the figure operators are given for it.
+//
+// Every bounds assertion in this package is keyed to the constant, which is
+// right — a test that restated 86400 would just be a second copy to keep in
+// step. The cost is that the constant is then unfalsifiable from inside the
+// package: raising it to 30 days leaves the whole k8s suite green, because every
+// check moves with it. Measured on the parent commit, exactly one test in the
+// repository objects, and it lives in the CLI package.
+//
+// The README is where that is not true. It tells operators the cap in MINUTES,
+// as a flat number, and nothing connects that number to the constant — so the
+// figure someone plans a run against can silently stop being the figure the
+// renderer enforces. This is the shape
+// TestSecurity_ReservedNamespaceBoundIsDocumentedAndTrue already establishes:
+// read the claim where it is written rather than restating it.
+//
+// Failing when the sentence is REWORDED is deliberate, not brittleness. The
+// number is the claim; a rewrite that moves it is a rewrite that has to be read
+// against the constant, and a test that quietly skipped when its anchor moved
+// would defend nothing.
+func TestSecurity_WallClockCapIsDocumentedAndTrue(t *testing.T) {
+	const (
+		anchorOpen  = "`budget.max_runtime_minutes` above the "
+		anchorClose = "-minute cap"
+	)
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "README.md"))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	// Flatten first so the check does not depend on where the prose wraps.
+	flat := strings.Join(strings.Fields(string(src)), " ")
+
+	start := strings.Index(flat, anchorOpen)
+	if start < 0 {
+		t.Fatalf("README no longer states the budget.max_runtime_minutes cap in the form %q...%q; that figure is what operators size a run against, so it must be re-tied to MaxActiveDeadlineSeconds rather than left unchecked", anchorOpen, anchorClose)
+	}
+	rest := flat[start+len(anchorOpen):]
+	end := strings.Index(rest, anchorClose)
+	if end < 0 {
+		t.Fatalf("README states %q but not %q after it; cannot read the documented cap", anchorOpen, anchorClose)
+	}
+
+	documented, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		t.Fatalf("README documents the cap as %q, which is not a number: %v", rest[:end], err)
+	}
+	if want := MaxActiveDeadlineSeconds / 60; documented != want {
+		t.Errorf("README tells operators the cap is %d minutes, but MaxActiveDeadlineSeconds is %d seconds (%d minutes). One of them moved without the other, and the one operators read is the wrong one", documented, MaxActiveDeadlineSeconds, want)
 	}
 }
 
