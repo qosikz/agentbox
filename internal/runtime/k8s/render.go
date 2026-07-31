@@ -282,8 +282,11 @@ func (s JobSpec) Render() (string, error) {
 		},
 	}
 
-	// Defence in depth, and the last thing checked before encoding.
+	// Defence in depth, and the last things checked before encoding.
 	if err := bindsPolicyToPod(np, j); err != nil {
+		return "", err
+	}
+	if err := runsOnePodWithFreshImages(j); err != nil {
 		return "", err
 	}
 

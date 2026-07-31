@@ -1,0 +1,264 @@
+package k8s
+
+import (
+	"strings"
+	"testing"
+)
+
+// The three fields covered here — completions, parallelism, and
+// imagePullPolicy — were pinned ONLY by the byte-for-byte golden manifests.
+// That is a weaker guard than it looks: a golden diff reports that the output
+// CHANGED, not that a security property broke, and `go test -update` rewrites
+// the goldens, after which the whole suite goes green on a manifest that starts
+// two agents from a cached image. These tests state the properties by name so a
+// regression fails as itself and no regeneration can absorb it.
+
+// allContainers returns every container the rendered pod would start, keyed by
+// name — init containers included, because one runs in the same pod, on the
+// same volumes, from the same image reference as the agent, so a pull policy
+// that drifted there is a pull policy that drifted for the run.
+//
+// It finds containers by SHAPE — any mapping that names an image — rather than
+// by walking `initContainers` and `containers` by name. Review showed why: the
+// by-name version was blind to a container declared in a list that did not
+// exist when it was written, and a manifest carrying such a container with no
+// pull policy at all passed the whole suite once the goldens were regenerated.
+// Nothing else in this manifest carries an `image` key, so the shape is exact.
+func allContainers(t *testing.T, manifest string) map[string]map[string]any {
+	t.Helper()
+	job := docs(t, manifest)[1]
+	pod, ok := dig(t, job, "spec", "template", "spec").(map[string]any)
+	if !ok {
+		t.Fatal("job spec.template.spec is not a mapping")
+	}
+	// The agent's own list is not optional, and the shape walk below cannot say
+	// so: with initContainers rendered and containers absent, it would return a
+	// non-empty set that starts no agent.
+	if _, present := pod["containers"]; !present {
+		t.Fatal("pod renders no containers list; the agent container is not optional")
+	}
+
+	out := map[string]map[string]any{}
+	walk(job, "Job", func(path string, m map[string]any) {
+		if _, isContainer := m["image"]; !isContainer {
+			return
+		}
+		name, ok := m["name"].(string)
+		if !ok || name == "" {
+			t.Fatalf("%s names an image but has no name", path)
+		}
+		out[name] = m
+	})
+	if len(out) == 0 {
+		t.Fatal("rendered pod declares no containers")
+	}
+	return out
+}
+
+// transportSpecs returns one valid spec per workspace transport, so a property
+// asserted here is asserted on every shape this renderer emits rather than on
+// the single spec the goldens happen to use.
+func transportSpecs(t *testing.T) map[string]JobSpec {
+	t.Helper()
+	image := validSpec()
+	image.WorkspaceTransport = WorkspaceFromImage
+	image.ImageWorkspacePath = "/andbo/workspace"
+	return map[string]JobSpec{
+		string(WorkspaceEmpty):     validSpec(),
+		string(WorkspaceFromImage): image,
+	}
+}
+
+// TestSecurity_JobRunsOnePodPerRun pins the Job to a single pod attempt.
+//
+// An agent run has side effects that are not confined to the pod — commits,
+// pushes, pull requests, and whatever tools the image carries. Kubernetes runs
+// up to `parallelism` pods at once, capped by the number of remaining
+// `completions`, until that many have succeeded. So completions above 1 repeats
+// the whole run once per completion, parallelism above 1 lets those repeats race
+// each other on the same repository with the same credentials, and the manifest
+// still reads as a normal Job. This is the argument backoffLimit 0 already makes
+// about retries, on the axis backoffLimit does not cover.
+//
+// Both fields are asserted PRESENT as well as equal to 1, and for completions
+// that is not a formality. parallelism defaults to 1 unconditionally, but
+// completions defaults to 1 only when parallelism is ALSO unset — and this
+// renderer always emits parallelism, so dropping completions alone leaves it
+// nil, which makes the Job a work-queue Job that finishes when any single pod
+// succeeds rather than a fixed-completion one. For parallelism, absence would
+// still break this package's contract that the manifest fully describes the run
+// (Command is required for the same reason): a reviewer should not have to know
+// an API default to know how many agents a manifest starts.
+func TestSecurity_JobRunsOnePodPerRun(t *testing.T) {
+	for name, spec := range transportSpecs(t) {
+		t.Run(name, func(t *testing.T) {
+			manifest, err := spec.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil", err)
+			}
+			jobSpec, ok := dig(t, docs(t, manifest)[1], "spec").(map[string]any)
+			if !ok {
+				t.Fatal("job spec is not a mapping")
+			}
+			for _, field := range []string{"completions", "parallelism"} {
+				v, present := jobSpec[field]
+				if !present {
+					t.Errorf("spec.%s is not rendered; the manifest must state how many pods the run starts rather than lean on the API default", field)
+					continue
+				}
+				if v != 1 {
+					t.Errorf("spec.%s = %v, want 1; above 1 the Job repeats every side effect of the run once per pod, and 0 means it never runs", field, v)
+				}
+			}
+		})
+	}
+}
+
+// TestSecurity_EveryContainerRePullsItsImage pins imagePullPolicy Always on
+// every container the pod starts.
+//
+// Under IfNotPresent the kubelet does not contact the registry at all when it
+// already holds something for that reference. Always makes it re-resolve at the
+// registry on every start, so a node cannot go on serving what it resolved for
+// that reference earlier.
+//
+// Absence is a weakening here in a way it is not for the two Job fields above:
+// the API server defaults an omitted policy at pod admission to Always for the
+// `:latest` tag or an untagged reference, and to IfNotPresent for every other
+// tag AND for a digest — which is exactly the digest pin this package tells
+// callers to use in production. Omitting the field would therefore turn the
+// hardest-pinned specs into the cached-image case.
+//
+// The bound, which EnforcementNotes states and this test does not claim past:
+// this is a FRESHNESS control, not an integrity one. Once the reference resolves
+// to a digest the node already stores, the runtime reuses those layers and
+// nothing re-verifies them, so it is no defence against a compromised image
+// store. It is an identity guarantee only when the reference is a digest, and
+// the pull itself is the kubelet's, outside anything this manifest controls.
+func TestSecurity_EveryContainerRePullsItsImage(t *testing.T) {
+	for name, spec := range transportSpecs(t) {
+		t.Run(name, func(t *testing.T) {
+			manifest, err := spec.Render()
+			if err != nil {
+				t.Fatalf("Render() = %v, want nil", err)
+			}
+			for cname, c := range allContainers(t, manifest) {
+				v, present := c["imagePullPolicy"]
+				if !present {
+					t.Errorf("container %q renders no imagePullPolicy; the API server then defaults it at pod admission to IfNotPresent for every reference but the :latest tag and the untagged form, so a digest-pinned run would accept the node's cached image", cname)
+					continue
+				}
+				if v != "Always" {
+					t.Errorf("container %q imagePullPolicy = %v, want Always; anything else lets an image the node resolved earlier serve the run", cname, v)
+				}
+			}
+		})
+	}
+}
+
+// TestRunsOnePodWithFreshImages exercises the render-time guard directly, on
+// constructed Jobs the public API cannot produce. It is what makes the property
+// enforceable rather than merely asserted: a future edit that adds a third
+// container, or that makes either Job field caller-supplied, fails the render
+// instead of emitting a manifest that starts more agents or an older image.
+func TestRunsOnePodWithFreshImages(t *testing.T) {
+	ok := func() job {
+		return job{Spec: jobSpec{
+			Completions: 1,
+			Parallelism: 1,
+			Template: podTemplate{Spec: podSpec{
+				InitContainers: []container{{Name: initContainerName, ImagePullPolicy: "Always"}},
+				Containers:     []container{{Name: containerName, ImagePullPolicy: "Always"}},
+			}},
+		}}
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*job)
+		// substr must appear in the error, so the message names the axis that
+		// drifted. This guard fuses two unrelated properties, so an
+		// unattributable "internal error" would leave a maintainer unable to
+		// tell a pull-policy drift from a pod-count one. Empty means the Job is
+		// hardened and must pass.
+		substr string
+	}{
+		{name: "hardened", mutate: func(*job) {}},
+		{name: "completions above one", mutate: func(j *job) { j.Spec.Completions = 2 }, substr: "completions=2"},
+		{name: "completions zero", mutate: func(j *job) { j.Spec.Completions = 0 }, substr: "completions=0"},
+		{name: "parallelism above one", mutate: func(j *job) { j.Spec.Parallelism = 5 }, substr: "parallelism=5"},
+		{name: "parallelism zero", mutate: func(j *job) { j.Spec.Parallelism = 0 }, substr: "parallelism=0"},
+		{
+			name:   "agent container caches its image",
+			mutate: func(j *job) { j.Spec.Template.Spec.Containers[0].ImagePullPolicy = "IfNotPresent" },
+			substr: `container "agent"`,
+		},
+		{
+			name:   "agent container names no policy",
+			mutate: func(j *job) { j.Spec.Template.Spec.Containers[0].ImagePullPolicy = "" },
+			substr: "imagePullPolicy",
+		},
+		{
+			name:   "init container caches its image",
+			mutate: func(j *job) { j.Spec.Template.Spec.InitContainers[0].ImagePullPolicy = "Never" },
+			substr: `container "workspace-init"`,
+		},
+		{
+			name: "a container added later forgets the policy",
+			mutate: func(j *job) {
+				j.Spec.Template.Spec.Containers = append(j.Spec.Template.Spec.Containers,
+					container{Name: "sidecar", ImagePullPolicy: "IfNotPresent"})
+			},
+			substr: `container "sidecar"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := ok()
+			tt.mutate(&j)
+
+			err := runsOnePodWithFreshImages(j)
+			if tt.substr == "" {
+				if err != nil {
+					t.Fatalf("runsOnePodWithFreshImages() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("runsOnePodWithFreshImages() = nil, want a refusal")
+			}
+			if !strings.Contains(err.Error(), tt.substr) {
+				t.Errorf("error does not name what drifted (want %q):\n%v", tt.substr, err)
+			}
+		})
+	}
+}
+
+// TestSecurity_OnePodAndFreshImageBoundsAreStated keeps the two claims this
+// milestone adds from being read wider than they are. Both have a bound an
+// operator has to know, and an untrue reading of either is worse than no claim:
+// "one pod" is not at-most-once execution, and Always is a freshness control,
+// not an integrity one.
+//
+// It asserts the LIMITING clauses, not the topic words. Matching on the topic
+// ("digest", "parallelism 1") only proves a note about the subject exists —
+// review demonstrated that such a test passes when both notes are replaced by
+// pure overclaims that happen to use the same vocabulary, which is the failure
+// this whole commit exists to remove, one level up. A clause that states the
+// limit cannot survive being rewritten into a guarantee.
+func TestSecurity_OnePodAndFreshImageBoundsAreStated(t *testing.T) {
+	notes := strings.ToLower(strings.Join(validSpec().EnforcementNotes(), "\n"))
+
+	for _, want := range []struct{ topic, substr string }{
+		{"Always is freshness, not tamper detection", "freshness control and not tamper detection"},
+		{"the cached layers are reused and not re-verified", "nothing re-verifies them"},
+		{"only a digest reference makes it an identity guarantee", "identity guarantee only when the reference is a digest"},
+		{"Andbo does not vouch for the image it names", "does not sign, verify, or admit"},
+		{"one pod scheduled is not one execution", "not a count of how many times the agent runs"},
+	} {
+		if !strings.Contains(notes, want.substr) {
+			t.Errorf("enforcement notes do not state the bound %q (looking for %q):\n%s", want.topic, want.substr, notes)
+		}
+	}
+}

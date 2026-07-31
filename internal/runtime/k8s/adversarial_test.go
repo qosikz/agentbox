@@ -44,6 +44,16 @@ var (
 	mustBeFalse   = []string{"privileged", "hostNetwork", "hostPID", "hostIPC", "allowPrivilegeEscalation", "automountServiceAccountToken"}
 	mustBeTrue    = []string{"readOnlyRootFilesystem", "runAsNonRoot"}
 	mustBeNonZero = []string{"runAsUser", "runAsGroup", "fsGroup"}
+	// mustEqual are fields whose rendered value is a constant of the contract
+	// rather than a caller input, so any other value is drift. Checked wherever
+	// they appear, for the same reason the lists above are: a weakened value
+	// must not be able to hide in a structure the top-level assertions do not
+	// walk into. Presence is checked separately (see assertContainersRePull) —
+	// this list can only speak for keys that were rendered.
+	mustEqual = map[string]any{
+		"parallelism": 1,
+		"completions": 1,
+	}
 )
 
 // walk visits every mapping in a decoded manifest, reporting the path so a
@@ -89,6 +99,23 @@ func assertHardened(t *testing.T, manifest string) {
 			for _, k := range mustBeNonZero {
 				if v, present := m[k]; present && v == 0 {
 					t.Errorf("%s.%s = 0 (root), must be non-zero", path, k)
+				}
+			}
+			for k, want := range mustEqual {
+				if v, present := m[k]; present && v != want {
+					t.Errorf("%s.%s = %v, must be %v", path, k, v, want)
+				}
+			}
+			// Any mapping that names an image is a container, whatever list it
+			// was declared in. Matching on SHAPE rather than on the list name is
+			// what makes this reach a container list that does not exist yet —
+			// ephemeralContainers, or whatever the next one is called. Review
+			// found the by-name version of this check blind to exactly that: a
+			// container in a new list, carrying no pull policy at all, took the
+			// whole suite green once the goldens were regenerated.
+			if _, isContainer := m["image"]; isContainer {
+				if v, present := m["imagePullPolicy"]; !present || v != "Always" {
+					t.Errorf("%s names an image but imagePullPolicy = %v (present=%v), want Always", path, v, present)
 				}
 			}
 			// Volumes may only be size-limited emptyDirs. This is what makes a
