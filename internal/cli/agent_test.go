@@ -201,8 +201,12 @@ func TestAgentDefaultIsRefusedBeforeRunAndK8sRender(t *testing.T) {
 // only thing standing between an untrusted andbo.yaml and live control bytes
 // there: a carriage return plus an erase-line escape rewrites the row it is
 // printed on, so a policy could erase its own ✗ and leave behind a row that
-// reads as passing. Swapping %q for %s in the error leaves every other assertion
-// in this file — and in the rest of the repo — green, so it is pinned here.
+// reads as passing. Dropping the ESCAPING while keeping the quotes — %q for
+// \"%s\" — leaves every other assertion in this file, and in the rest of the
+// repo, green: the tests above match on fmt.Sprintf("%q", value), so they pin
+// the quotes and not the escaping. Plain %s reddens those three as well, but
+// only because it also drops the quotes they match on. This pins the escaping
+// on its own.
 //
 // Asserted on the two surfaces this commit created: doctor's detail and policy
 // check's error strings. `policy check`'s human report separately echoes the

@@ -21,7 +21,8 @@ import (
 //
 // The name is all this answers for. `custom` with an empty agent.custom.command
 // resolves here and then fails at BuildCommand, so it is still reported valid by
-// both gates and refused by run at exit 4 — a second gap, in a different field,
+// both gates and refused by run AND k8s render at exit 4 — a second gap, in a
+// different field,
 // left for its own milestone rather than widened into this one.
 //
 // It returns a plain error rather than a coded one because both callers use the
