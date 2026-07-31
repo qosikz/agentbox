@@ -107,7 +107,8 @@ All notable changes to Andbo are documented here.
   The gate answers for the **name**, and only the name: `agent.default: custom`
   with an empty `agent.custom.command` still resolves — the failure lives in the
   adapter's `BuildCommand` — so it is still reported valid here and refused by
-  `run` at exit `4`. That is a second gap in a different field, left for its own
+  `run` *and* `k8s render` at exit `4`, exactly like the name cases above. That
+  is a second gap in a different field, left for its own
   milestone rather than folded into this one. It is unchanged from before.
 - **`andbo doctor` reported `config: ✓ andbo.yaml valid` for policies every
   other command refuses.** It only asked whether the YAML decoded, so a
