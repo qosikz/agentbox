@@ -430,7 +430,7 @@ Two things that example does **not** do, and that no flag can make it do:
 | Flag | Meaning |
 |---|---|
 | `--name` | Job name; also the label the `NetworkPolicy` selects on (DNS-1123 label) |
-| `--namespace` | An **existing** namespace dedicated to agent runs; Andbo does not create it |
+| `--namespace` | An **existing** namespace dedicated to agent runs; Andbo does not create it, and refuses the `kube-` prefix Kubernetes reserves for system namespaces |
 | `--workspace empty` \| `image:/path` | How the workspace reaches the pod. Required — there is no default |
 | `--runtime-class`, `--service-account` | Optional; rendered only when given (token automount stays off) |
 | `--policy`, `--json` | As elsewhere |

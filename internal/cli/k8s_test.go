@@ -182,6 +182,11 @@ func TestK8sRenderRejectsIncompleteInvocations(t *testing.T) {
 		{"value on a boolean flag", okArgs("--json=false"), ExitGeneral, "flag --json takes no value"},
 		{"second positional", []string{"render", "t", "extra", "--name", "n", "--namespace", "ns", "--workspace", "empty"}, ExitGeneral, `unexpected argument: "extra"`},
 		{"reserved namespace", []string{"render", "t", "--name", "n", "--namespace", "kube-system", "--workspace", "empty"}, ExitInvalidConfig, "reserved for cluster control-plane"},
+		// The three namespaces the API reserves by name are not the whole set: an
+		// installer-added kube- namespace holds control-plane components too, and
+		// carries the broad allow-egress policy that would defeat this Job's
+		// default-deny.
+		{"kube-prefixed namespace", []string{"render", "t", "--name", "n", "--namespace", "kube-flannel", "--workspace", "empty"}, ExitInvalidConfig, "reserved for cluster control-plane"},
 		{"name is not a DNS label", []string{"render", "t", "--name", "Fix_Tests", "--namespace", "ns", "--workspace", "empty"}, ExitInvalidConfig, "is not a DNS-1123 label"},
 	}
 
