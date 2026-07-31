@@ -34,6 +34,16 @@ import "fmt"
 // edit anywhere between building the document and encoding it still has to leave
 // it denying both ways.
 //
+// That is also what makes it more than a second opinion on what the tests
+// already check, and the difference was measured rather than assumed. The tests
+// below sample SHAPES; this runs for every CALLER. A downgrade gated on a value
+// no fixture uses — `if s.RuntimeClassName == "kata" { return
+// []string{"Ingress"} }`, where the fixtures reach only "gvisor" and "" — passes
+// the entire repository green, goldens included, because nothing renders that
+// caller. The guard refuses it, so the manifest is never emitted. No fixture set
+// closes that in general, which is the same sampling bound containerLists states
+// for the one-container contract.
+//
 // Bounds, all real:
 //
 //   - It checks that the policy DENIES, not that the cluster enforces the
