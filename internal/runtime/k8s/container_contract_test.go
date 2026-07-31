@@ -100,12 +100,17 @@ func containerLists(t *testing.T) map[string]struct {
 //     pod's whole life, and it decides the outcome of the run in both
 //     directions. In the kubelet's getPhase, `case running > 0 && unknown == 0:
 //     return v1.PodRunning` is evaluated BEFORE every terminal case IN THAT
-//     SWITCH — the qualifier is load-bearing, because getPhase does have one
-//     terminal return ahead of the switch, `failedInitialization > 0 &&
-//     spec.RestartPolicy == RestartPolicyNever`, and this renderer reaches both
-//     halves of it (Never always, an init container under
-//     `--workspace image:`). It cannot apply in the case described here, since
-//     an agent that exited 0 had its init containers succeed. So a
+//     SWITCH — the qualifier is load-bearing, because getPhase returns
+//     PodFailed AHEAD of the switch for failed init containers, and this
+//     renderer renders one under `--workspace image:`. That is an if/else on a
+//     feature gate, so there are two such statements and exactly one is live:
+//     with ContainerRestartRules (Beta and default-ON since 1.35) the condition
+//     is `failedInitializationNotRestartable > 0`, and with the gate off it is
+//     `failedInitialization > 0 && spec.RestartPolicy == RestartPolicyNever`,
+//     whose second half this renderer always satisfies. Naming only the
+//     gate-off one would repeat the defect this correction fixes. Neither can
+//     apply in the case described here, since an agent that exited 0 had its
+//     init containers succeed and both counters are then 0. So a
 //     second container that does not exit holds the pod Running after the agent
 //     has exited 0 — the Job never completes and instead burns its whole
 //     activeDeadlineSeconds, ending Failed/DeadlineExceeded with the pod and its

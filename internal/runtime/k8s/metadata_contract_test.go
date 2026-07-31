@@ -5,12 +5,17 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Every closure in this package stops at `metadata:`. The Job's four contracts
 // and the deny-all all name "metadata" in their allowed key sets and none of
-// them descends into it, so objectMeta was the one rendered mapping no contract
-// in the repository reached. The gap was measured, not argued.
+// them descends into it, so TWO rendered mappings were reached by no contract in
+// the repository: objectMeta, which this file closes, and templateMeta, which it
+// does not — see the bound at the end of carriesIdentityOnlyMetadata's doc, and
+// read nothing here as a claim about the pod template's own metadata. The gap
+// was measured, not argued.
 //
 // Adding `Annotations map[string]string` and `OwnerReferences []ownerReference`
 // to objectMeta — both `omitempty`, both left unset — took the WHOLE repository
@@ -43,6 +48,115 @@ import (
 // render, and the guard test asks what Render REFUSES — and only the last of
 // those makes the boundary fail closed rather than merely observed.
 
+// TestRenderedKeyAgreesWithTheEncoder pins renderedKey to what yaml.v3 actually
+// emits, rather than to a plausible reading of struct tags.
+//
+// The guard's entire claim is about what SHIPS, so a parser that disagrees with
+// the encoder is not a smaller guard — it is a hole shaped exactly like the one
+// this file was written to close. Review found two, and both were invisible to
+// every other test in the package:
+//
+//   - `yaml:"-,omitempty"`. yaml.v3 drops a field only when the tag is EXACTLY
+//     "-"; with anything appended it falls through to the split and renders
+//     under the literal key `-`. The guard split the tag FIRST and then tested
+//     the name, so it skipped a field that ships. Measured: a
+//     `Finalizers []string` with that tag took the whole repository green,
+//     which is the pre-commit state reproduced on top of the new guard.
+//   - an unexported field. yaml.v3 never renders one; the guard walked it
+//     anyway and the label arm's `fv.Interface()` PANICKED out of Render
+//     instead of returning an error.
+//
+// So this test compares key SETS against the encoder's own output. Anything
+// that makes renderedKey and yaml.v3 disagree fails here, whichever direction
+// the disagreement runs.
+func TestRenderedKeyAgreesWithTheEncoder(t *testing.T) {
+	type tagged struct {
+		Name string `yaml:"name"`
+	}
+	type untagged struct {
+		Namespace string
+	}
+	type optioned struct {
+		Name string `yaml:"name,omitempty"`
+	}
+	type dropped struct {
+		Name   string `yaml:"name"`
+		Secret string `yaml:"-"`
+	}
+	type droppedWithOption struct {
+		Name   string `yaml:"name"`
+		Secret string `yaml:"-,omitempty"`
+	}
+	type withUnexported struct {
+		Name   string `yaml:"name"`
+		hidden string
+	}
+
+	for _, tt := range []struct {
+		name string
+		v    any
+	}{
+		{"a plain tag", tagged{Name: "n"}},
+		{"no tag at all", untagged{Namespace: "ns"}},
+		{"a tag carrying an option", optioned{Name: "n"}},
+		{"a field the encoder drops", dropped{Name: "n", Secret: "s"}},
+		{"a dropped tag with an option appended", droppedWithOption{Name: "n", Secret: "s"}},
+		{"an unexported field", withUnexported{Name: "n", hidden: "h"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := yaml.Marshal(tt.v)
+			if err != nil {
+				t.Fatalf("yaml.Marshal(%T) = %v, want nil", tt.v, err)
+			}
+			emitted := map[string]any{}
+			if err := yaml.Unmarshal(out, &emitted); err != nil {
+				t.Fatalf("yaml.Unmarshal: %v", err)
+			}
+			var got []string
+			for k := range emitted {
+				got = append(got, k)
+			}
+
+			var want []string
+			typ := reflect.TypeOf(tt.v)
+			for i := range typ.NumField() {
+				key, skipped, inline := renderedKey(typ.Field(i))
+				if skipped || inline {
+					continue
+				}
+				want = append(want, key)
+			}
+
+			slices.Sort(got)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Errorf("renderedKey predicts %v for %T but the encoder emits %v.\nThe guard checks the keys it predicts, so every key the encoder emits and renderedKey does not name is a metadata key that ships unexamined:\n%s", want, tt.v, got, out)
+			}
+		})
+	}
+
+	// Inline is reported rather than named, because the encoder emits the
+	// inlined map's OWN keys and there is no single key to predict — which is
+	// exactly why the guard refuses the shape instead of checking it.
+	t.Run("an inlined map", func(t *testing.T) {
+		type inlined struct {
+			Name  string            `yaml:"name"`
+			Extra map[string]string `yaml:",inline"`
+		}
+		typ := reflect.TypeOf(inlined{})
+		if _, _, inline := renderedKey(typ.Field(1)); !inline {
+			t.Error("renderedKey does not report the inline option; the guard would then check the field under its own name while the encoder spreads its keys across the mapping")
+		}
+		out, err := yaml.Marshal(inlined{Name: "n", Extra: map[string]string{"ownerReferences": "x"}})
+		if err != nil {
+			t.Fatalf("yaml.Marshal = %v, want nil", err)
+		}
+		if !strings.Contains(string(out), "ownerReferences") {
+			t.Fatalf("the encoder does not inline the map, so this case no longer demonstrates the hazard:\n%s", out)
+		}
+	})
+}
+
 // metadataShapes returns the shapes to assert the metadata contract on.
 //
 // It borrows denyAllSpecs for its FIXTURE VALUES — that helper is already this
@@ -57,13 +171,24 @@ func metadataShapes(t *testing.T) map[string]JobSpec {
 
 	out := denyAllSpecs(t)
 
+	// The name axis is crossed with the RICHEST shape, not with validSpec.
+	// Review caught the first version building these two from validSpec, which
+	// leaves every optional field at its zero value — so a metadata field gated
+	// on both a long name and an opt-in would have rendered in no shape here.
+	// That is the fixture blindness this package has paid for before, arriving
+	// through the one axis this contract added itself.
+	rich, ok := out[string(WorkspaceFromImage)+"/all-options"]
+	if !ok {
+		t.Fatalf("denyAllSpecs no longer carries the %q shape, which is where this package keeps every optional field moved off its default; the name axis below would otherwise be crossed only with zero values", string(WorkspaceFromImage)+"/all-options")
+	}
+
 	// The longest name Validate admits, which is also the longest instance
 	// label and the longest "-deny-all" policy name the renderer can emit.
-	long := validSpec()
+	long := rich
 	long.Name = strings.Repeat("a", MaxNameLength)
 	out["longest admissible name"] = long
 
-	short := validSpec()
+	short := rich
 	short.Name = "a"
 	out["shortest admissible name"] = short
 
@@ -202,14 +327,19 @@ func TestSecurity_NoOtherFieldCanWidenTheMetadata(t *testing.T) {
 // fourth label fails the render instead of emitting an object that still reads
 // as Andbo's.
 //
-// Only one of the guard's refusals is reachable from a VALUE, and saying so is
-// part of the contract rather than an excuse. The label key set is data, so it
-// is table-tested below. The other three — an inline map, an out-of-contract
-// field name, and a field whose type is not a bounded scalar — are properties of
-// the objectMeta TYPE, which no test value can vary. They were proven by
-// mutating the struct and observing every render in the package fail, and that
-// is the point of putting them in the guard rather than only in the closure
-// above: a declared field breaks the render for every caller, not one test.
+// Only one of the guard's five refusals is reachable from a VALUE, and saying so
+// is part of the contract rather than an excuse. The label key set is data, so it
+// is table-tested below. The other four — an inline field, an out-of-contract
+// field name, a "labels" that is not the label map, and a field whose type is
+// neither that map nor a bounded scalar — are properties of the objectMeta TYPE,
+// which no test value can vary. They were proven by mutating the struct and
+// observing every render in the package fail, and that is the point of putting
+// them in the guard rather than only in the closure above: a declared field
+// breaks the render for every caller, not one test.
+//
+// The tag-parsing those refusals rest on is NOT type-level and is tested
+// directly, by TestRenderedKeyAgreesWithTheEncoder — which is where review found
+// two holes that every test here was blind to.
 func TestCarriesIdentityOnlyMetadata(t *testing.T) {
 	for _, tt := range metadataGuardCases() {
 		t.Run(tt.name, func(t *testing.T) {

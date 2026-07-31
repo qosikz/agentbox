@@ -5,8 +5,11 @@ All notable changes to Andbo are documented here.
 ## Unreleased
 
 ### Added
-- **Kubernetes runner: `metadata:` was the one rendered mapping no contract in
-  the repository reached, and it is now closed at render time.** A new guard
+- **Kubernetes runner: the Job's and the NetworkPolicy's own `metadata:` was
+  reached by no contract in the repository, and is now closed at render time.**
+  Two rendered mappings were unreached, not one — the other is the POD
+  TEMPLATE's `metadata`, which this does **not** close; see the bound at the end
+  of this entry. A new guard
   (`carriesIdentityOnlyMetadata`) refuses any `objectMeta` field outside `name`,
   `namespace` and `labels`, any label key outside the three `jobLabels` builds,
   any `yaml:",inline"` field, and any value that is neither a bounded scalar nor
@@ -29,12 +32,16 @@ All notable changes to Andbo are documented here.
   enforcement notes already state — the policy "carries no ownerReference, so it
   is neither garbage-collected with the Job nor protected from removal". An owned
   policy is collected when the Job is, and the two deletions do not take the same
-  time: a `NetworkPolicy` has no grace period while its pod has one, defaulted to
-  30 seconds because this renderer sets none, and cascading deletion gives no
-  ordering guarantee among an owner's dependents. So the deny-all can be gone for
+  time — a `NetworkPolicy` is not a pod and has no
+  `terminationGracePeriodSeconds`, so its deletion completes at once, while the
+  Job's pod keeps running for up to the 30 seconds this renderer never sets and
+  the API server therefore defaults. So the deny-all can be gone for
   the last seconds of a run that is still committing and pushing, and nothing
   about the manifest looks wrong, because the field that did it is metadata
-  rather than spec.
+  rather than spec. (A first draft of this entry also claimed cascading deletion
+  gives no ordering guarantee among an owner's dependents. Review flagged that it
+  had not been checked against the garbage collector's source, and the
+  grace-period asymmetry carries the point without it, so it is gone.)
 
   Only one of the four refusals is reachable from a value, which the guard's own
   doc states rather than glosses: the label key set is data and is table-tested,
@@ -43,9 +50,32 @@ All notable changes to Andbo are documented here.
   render in the package fail — including the one that shows the closure is not
   redundant with the guard, where a `generateName` field plus a deleted key check
   left `TestSecurity_NoOtherFieldCanWidenTheMetadata` as the only failure.
-  **Bound:** the guard reads `objectMeta`. `templateMeta` — the pod template's
-  own metadata, whose labels are what the `NetworkPolicy` binds to — is a
-  different type and is not reached.
+
+  Review found two parsing defects in the first version of the guard, and both
+  were the *same class of hole this commit exists to close*, so they are recorded
+  rather than quietly fixed. `yaml:"-,omitempty"` is not a dropped field: yaml.v3
+  drops one only when the tag is **exactly** `-`, and with an option appended it
+  renders under the literal key `-`. The guard split the tag before testing it,
+  and so did `declaredKeys` — the two halves that are supposed to catch each
+  other had one parsing bug between them, and a `Finalizers []string` with that
+  tag took the whole repository green on top of the new guard. Separately, the
+  guard walked unexported fields, which yaml.v3 never renders, and the label
+  arm's `reflect.Value.Interface()` **panicked out of `Render`** instead of
+  returning an error. Both are fixed in one shared `renderedKey`, and
+  `TestRenderedKeyAgreesWithTheEncoder` now pins it against yaml.v3's own output
+  rather than against a reading of the tag rules. Review also caught the label
+  arm sitting *after* the bounded-scalar arm, so retyping `Labels` to a string
+  would have been waved through as a scalar with the label keys unchecked; the
+  arms are reordered and the type is demanded inside the label arm.
+
+  **Bound, and it is the larger one:** the guard reads `objectMeta`.
+  `templateMeta` — the POD's own metadata, whose labels the `NetworkPolicy` binds
+  to and whose labels and annotations are what a mesh injector actually reads —
+  is a different type, is reached by no guard and no closure, and review
+  demonstrated the gap with the same experiment: an `annotations` field on
+  `templateMeta` wired to a new `JobSpec` field renders
+  `sidecar.istio.io/inject: "true"` into the pod template with the whole
+  repository green. That is the next gate.
 
 - **Kubernetes runner: the rendered `NetworkPolicy` is enforced to deny both
   directions.** A new render-time guard (`deniesEveryDirection`) refuses any
@@ -139,11 +169,14 @@ All notable changes to Andbo are documented here.
   Why a second container is a security problem and not a tidiness one, verified
   against the kubelet's `getPhase` rather than assumed: `case running > 0 &&
   unknown == 0: return v1.PodRunning` is evaluated *before every terminal case in
-  that switch* — the qualifier was added later, because `getPhase` has one
-  terminal return ahead of the switch (`failedInitialization > 0 &&
-  spec.RestartPolicy == RestartPolicyNever`) that this renderer reaches, though
-  not in the case described here, since an agent that exited 0 had its init
-  containers succeed —
+  that switch* — the qualifier was added later, because `getPhase` returns
+  `PodFailed` ahead of the switch for failed init containers, which this
+  renderer can produce. That is an if/else on a feature gate, so there are two
+  such statements and exactly one is live:
+  `failedInitializationNotRestartable > 0` with `ContainerRestartRules` (Beta,
+  default-on since 1.35), `failedInitialization > 0 && spec.RestartPolicy ==
+  RestartPolicyNever` without it. Neither applies in the case described here,
+  since an agent that exited 0 had its init containers succeed —
   so a container that does not exit holds the pod `Running` after the agent has
   exited 0 — the Job never completes and burns its whole
   `activeDeadlineSeconds`, ending `Failed/DeadlineExceeded` with the pod and its
@@ -259,22 +292,42 @@ All notable changes to Andbo are documented here.
   `ValidateImmutableField` on exactly those six *and separately* calls
   `validatePodTemplateUpdate`, `validateCompletions` and
   `validateJobSchedulingUpdate` — so a README-only reader concluded the pod
-  template was editable on a live Job, contradicting what the same page says
-  three paragraphs earlier about `restartPolicy` and `imagePullPolicy`.
+  template was unheld, contradicting what the same page says three paragraphs
+  earlier about `restartPolicy` and `imagePullPolicy`.
   `TestSecurity_ReadmeSaysTheImmutableListIsPartial` now fails if the qualifier
   is dropped again, and asserts the helper NAMES rather than the sentence, since
   a name is the smallest thing a rewrite cannot keep while dropping the point.
+
+  The first version of that correction then over-corrected in the other
+  direction, and review caught it against upstream: it said flatly that the pod
+  template "is not" editable on a live Job. The template is immutable outright
+  only while the Job is **not suspended**. `validatePodTemplateUpdate` copies the
+  incoming `nodeSelector`, `tolerations`, node affinity, `schedulingGates` and —
+  the ones that matter for this manifest — the template's **`labels` and
+  `annotations`** onto the old object before the immutability check when
+  `AllowMutableSchedulingDirectives` is set, and `AllowMutablePodResources`
+  exempts container `resources`; `strategy.go` sets both from `suspended`, and
+  both feature gates are Beta and default-on from 1.36. The paragraph the
+  sentence lives in is *about* an operator suspending and resuming the Job, so it
+  understated the risk to exactly the actor it was describing.
+  `restartPolicy`, `imagePullPolicy` and container-list membership are held in
+  every branch, which the same page already said and still says.
 - **Kubernetes runner: the one-container test's `getPhase` claim outlived its own
   correction.** `runsOnlyTheAgent`'s doc was corrected to say `case running > 0
   && unknown == 0` is reached before the terminal cases *in that switch*, and
   noted the one terminal return ahead of it; the test comment and the changelog
   entry that made the same claim were not. Verified against upstream: `getPhase`
-  returns `PodFailed` before the switch when `failedInitialization > 0 &&
-  spec.RestartPolicy == RestartPolicyNever`, and this renderer reaches both
-  halves of that condition (`Never` always, an init container under
-  `--workspace image:`). The conclusion is unaffected — an agent that exited 0
-  had its init containers succeed — but "before every terminal case" was wrong as
-  written in two of the three places it appeared.
+  returns `PodFailed` before the switch for failed init containers, which this
+  renderer can produce because it renders one under `--workspace image:`. It is
+  an if/else on a feature gate — two statements, one live — and naming only one
+  of them would have repeated the defect being fixed: the condition is
+  `failedInitializationNotRestartable > 0` with
+  `ContainerRestartRules` (Beta and default-on since 1.35) and
+  `failedInitialization > 0 && spec.RestartPolicy == RestartPolicyNever` with the
+  gate off, whose second half this renderer always satisfies. The conclusion is
+  unaffected — an agent that exited 0 had its init containers succeed, so both
+  counters are 0 — but "before every terminal case" was wrong as written in two
+  of the three places it appeared.
 - **Kubernetes renderer: the no-retry and one-pod contracts were stated as
   properties of the run, and only some of them survive being applied.** The
   wall-clock note already said `activeDeadlineSeconds` is mutable on a live Job;

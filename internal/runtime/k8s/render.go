@@ -323,8 +323,10 @@ func (s JobSpec) Render() (string, error) {
 	if err := boundsTheRunsWallClock(j); err != nil {
 		return "", err
 	}
-	// Last, because the guards above say more about a missing namespace than
-	// this one can, and a metadata refusal must not mask theirs.
+	// Last, and the ordering is free rather than load-bearing: nothing this
+	// guard refuses overlaps what the guards above refuse. It cannot fire on a
+	// missing namespace at all — an empty string is still a bounded scalar — so
+	// there is no refusal of bindsPolicyToPod's for it to mask, in either order.
 	if err := carriesIdentityOnlyMetadata("NetworkPolicy", np.Metadata); err != nil {
 		return "", err
 	}

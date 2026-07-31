@@ -565,8 +565,18 @@ without even restarting the agent. Read that list as what it is: the immutable
 also calls `validatePodTemplateUpdate`, `validateCompletions` and
 `validateJobSchedulingUpdate`, which is why `restartPolicy` and `completions`
 above are held while this field is not — a reader who took the six names for the
-whole of it would conclude the pod template was editable on a live Job, and it is
-not. The budget in the manifest you reviewed is the budget at
+whole of it would conclude the pod template was unheld, and it is not. What that
+reader would get *wrong in the other direction* is worth the same sentence,
+because it lands on the operator described in this very paragraph: the template
+is immutable outright only while the Job is **not suspended**. Suspend it and
+`validatePodTemplateUpdate` copies the incoming `nodeSelector`, `tolerations`,
+node affinity, `schedulingGates` and — the ones that matter here — the template's
+**`labels` and `annotations`** onto the old object before the immutability check,
+so those become editable, as do container `resources`. Both gates for that
+(`MutableSchedulingDirectivesForSuspendedJobs`,
+`MutablePodResourcesForSuspendedJobs`) are Beta and on by default from 1.36.
+`restartPolicy`, `imagePullPolicy` and the container list are still held in every
+branch. The budget in the manifest you reviewed is the budget at
 apply time, not for the life of the run. And enforcement is entirely the
 cluster's: nothing in Andbo supervises a pod, so a Job reconciled by another
 controller through `managedBy` gets no deadline applied at all.

@@ -965,20 +965,27 @@ func TestSecurity_WallClockBoundsAreStated(t *testing.T) {
 // the two catch different things — this one cannot see a key that appears
 // without a struct field behind it (a nested map, or a renamed tag), and that
 // walk cannot see a field that did not render.
+// It shares renderedKey with the metadata guard rather than parsing tags a
+// second time, and review is what established that this is not tidiness. Both
+// copies split the tag before testing it for "-", so both skipped a
+// `yaml:"-,omitempty"` field that yaml.v3 renders under the literal key "-" —
+// the two halves this package relies on to catch each other had one parsing bug
+// between them. One parser, pinned against the encoder itself by
+// TestRenderedKeyAgreesWithTheEncoder, is what stops that recurring.
+//
+// An inlined field is reported under its own name here even though the encoder
+// spreads its keys across the mapping. That is deliberate: no single declared
+// key describes it, so naming it makes assertClosed fail loudly rather than
+// letting the shape through unexamined.
 func declaredKeys(t *testing.T, typ reflect.Type) []string {
 	t.Helper()
 	var out []string
 	for i := range typ.NumField() {
-		f := typ.Field(i)
-		tag, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
-		switch tag {
-		case "-":
+		key, skipped, _ := renderedKey(typ.Field(i))
+		if skipped {
 			continue
-		case "":
-			// yaml.v3 lowercases the field name when no tag is given.
-			tag = strings.ToLower(f.Name)
 		}
-		out = append(out, tag)
+		out = append(out, key)
 	}
 	return out
 }
