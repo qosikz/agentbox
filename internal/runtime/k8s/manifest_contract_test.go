@@ -585,10 +585,38 @@ func TestSecurity_OnePodAndFreshImageBoundsAreStated(t *testing.T) {
 // against the constant, and a test that quietly skipped when its anchor moved
 // would defend nothing.
 func TestSecurity_WallClockCapIsDocumentedAndTrue(t *testing.T) {
-	const (
-		anchorOpen  = "`budget.max_runtime_minutes` above the "
-		anchorClose = "-minute cap"
-	)
+	// Both figures the README puts in front of an operator, and the constant
+	// each one is a rendering of. The DEFAULT belongs here at least as much as
+	// the cap, and review is what established which way round: the cap is the
+	// number a run is REFUSED at, while the default is the number a run actually
+	// GETS whenever budget.max_runtime_minutes is 0. Measured, changing
+	// DefaultActiveDeadlineSeconds objected only in the three goldens and in one
+	// CLI test asserting the literal string "activeDeadlineSeconds: 1800" — a
+	// second hardcoded copy rather than a tie to the constant — so nothing
+	// connected the documented figure to the emitted one.
+	tests := []struct {
+		what        string
+		open, close string
+		// unit converts the constant into the unit the README quotes it in.
+		unit  int64
+		value int64
+	}{
+		{
+			what:  "the cap a run is refused at",
+			open:  "`budget.max_runtime_minutes` above the ",
+			close: "-minute cap",
+			unit:  60,
+			value: MaxActiveDeadlineSeconds,
+		},
+		{
+			what:  "the default a run gets when no budget is set",
+			open:  "`budget.max_runtime_minutes`, or ",
+			close: "s when that is `0`",
+			unit:  1,
+			value: DefaultActiveDeadlineSeconds,
+		},
+	}
+
 	src, err := os.ReadFile(filepath.Join("..", "..", "..", "README.md"))
 	if err != nil {
 		t.Fatalf("read README.md: %v", err)
@@ -596,22 +624,26 @@ func TestSecurity_WallClockCapIsDocumentedAndTrue(t *testing.T) {
 	// Flatten first so the check does not depend on where the prose wraps.
 	flat := strings.Join(strings.Fields(string(src)), " ")
 
-	start := strings.Index(flat, anchorOpen)
-	if start < 0 {
-		t.Fatalf("README no longer states the budget.max_runtime_minutes cap in the form %q...%q; that figure is what operators size a run against, so it must be re-tied to MaxActiveDeadlineSeconds rather than left unchecked", anchorOpen, anchorClose)
-	}
-	rest := flat[start+len(anchorOpen):]
-	end := strings.Index(rest, anchorClose)
-	if end < 0 {
-		t.Fatalf("README states %q but not %q after it; cannot read the documented cap", anchorOpen, anchorClose)
-	}
+	for _, tt := range tests {
+		t.Run(tt.what, func(t *testing.T) {
+			start := strings.Index(flat, tt.open)
+			if start < 0 {
+				t.Fatalf("README no longer states %s in the form %q...%q; that figure is what operators size a run against, so it must be re-tied to the constant rather than left unchecked", tt.what, tt.open, tt.close)
+			}
+			rest := flat[start+len(tt.open):]
+			end := strings.Index(rest, tt.close)
+			if end < 0 {
+				t.Fatalf("README states %q but not %q after it; cannot read %s", tt.open, tt.close, tt.what)
+			}
 
-	documented, err := strconv.Atoi(rest[:end])
-	if err != nil {
-		t.Fatalf("README documents the cap as %q, which is not a number: %v", rest[:end], err)
-	}
-	if want := MaxActiveDeadlineSeconds / 60; documented != want {
-		t.Errorf("README tells operators the cap is %d minutes, but MaxActiveDeadlineSeconds is %d seconds (%d minutes). One of them moved without the other, and the one operators read is the wrong one", documented, MaxActiveDeadlineSeconds, want)
+			documented, err := strconv.Atoi(rest[:end])
+			if err != nil {
+				t.Fatalf("README documents %s as %q, which is not a number: %v", tt.what, rest[:end], err)
+			}
+			if want := tt.value / tt.unit; int64(documented) != want {
+				t.Errorf("README tells operators %s is %d, but the constant is %d seconds (%d in the README's unit). One of them moved without the other, and the one operators read is the wrong one", tt.what, documented, tt.value, want)
+			}
+		})
 	}
 }
 
@@ -693,7 +725,15 @@ func deadlineSpecs(t *testing.T) map[string]JobSpec {
 //     is visible in a manifest that still lists the key, which is why the type
 //     is asserted rather than the key.
 //   - RANGE. Below 1 and above the cap are both refused; see
-//     TestBoundsTheRunsWallClock for what each end means.
+//     TestBoundsTheRunsWallClock for what each end means. Unlike the other
+//     three, this one is DOMINATED here and cannot fail on its own — review
+//     established it and the honest thing is to say so rather than present four
+//     independent properties. In range, SOURCE below is stricter and fails
+//     first; out of range, Render never reaches the encoding at all, because it
+//     validates before it builds. It is kept as the assertion that survives
+//     SOURCE being relaxed, not as one that earns its keep today, and the range
+//     itself is enforced twice over — by Validate on the input and by
+//     boundsTheRunsWallClock on the constructed Job.
 //   - SOURCE. The rendered value must be the value that was VALIDATED. A
 //     renderer that emitted a constant would pass a presence-and-range check
 //     while describing a run nobody asked for — the manifest would state a
@@ -857,16 +897,37 @@ func TestBoundsTheRunsWallClock(t *testing.T) {
 	tests := []struct {
 		name     string
 		deadline int64
-		// substr must appear in the error, so a maintainer can tell which end of
-		// the range was hit. Empty means the Job is bounded and must pass.
-		substr string
+		// Every substr must appear in the error, and TWO things have to be
+		// pinned, not one. Naming the value alone does not discriminate the
+		// branches: both messages interpolate it with %d, so
+		// "activeDeadlineSeconds=0" appears in whichever message the guard
+		// returns. Review demonstrated the cost — replacing the low branch's
+		// return with the over-cap message verbatim took the whole repository
+		// green, leaving the guard to tell a maintainer that a budget of 0
+		// "exceeds the 86400-second cap" and to advise lowering it, which is the
+		// opposite of the fix for the case this guard's doc comment exists to
+		// explain as the subtle one. Each case therefore carries a clause unique
+		// to its branch as well. Empty means the Job is bounded and must pass.
+		substrs []string
 	}{
 		{name: "the default budget", deadline: DefaultActiveDeadlineSeconds},
 		{name: "one second", deadline: 1},
 		{name: "the cap itself", deadline: MaxActiveDeadlineSeconds},
-		{name: "zero is not the absence of a deadline", deadline: 0, substr: "activeDeadlineSeconds=0"},
-		{name: "negative", deadline: -1, substr: "activeDeadlineSeconds=-1"},
-		{name: "one past the cap", deadline: MaxActiveDeadlineSeconds + 1, substr: "exceeds the"},
+		{
+			name:     "zero is not the absence of a deadline",
+			deadline: 0,
+			substrs:  []string{"activeDeadlineSeconds=0", "a deadline already spent"},
+		},
+		{
+			name:     "negative",
+			deadline: -1,
+			substrs:  []string{"activeDeadlineSeconds=-1", "a deadline already spent"},
+		},
+		{
+			name:     "one past the cap",
+			deadline: MaxActiveDeadlineSeconds + 1,
+			substrs:  []string{"activeDeadlineSeconds=86401", "exceeds the"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -877,7 +938,7 @@ func TestBoundsTheRunsWallClock(t *testing.T) {
 			}
 
 			err := boundsTheRunsWallClock(j)
-			if tt.substr == "" {
+			if len(tt.substrs) == 0 {
 				if err != nil {
 					t.Fatalf("boundsTheRunsWallClock() = %v, want nil", err)
 				}
@@ -886,8 +947,10 @@ func TestBoundsTheRunsWallClock(t *testing.T) {
 			if err == nil {
 				t.Fatal("boundsTheRunsWallClock() = nil, want a refusal")
 			}
-			if !strings.Contains(err.Error(), tt.substr) {
-				t.Errorf("error does not say which end of the range was hit (want %q):\n%v", tt.substr, err)
+			for _, want := range tt.substrs {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error does not say which end of the range was hit (want %q):\n%v", want, err)
+				}
 			}
 		})
 	}
