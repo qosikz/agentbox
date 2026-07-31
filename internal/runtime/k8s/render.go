@@ -301,6 +301,9 @@ func (s JobSpec) Render() (string, error) {
 	if err := retriesNothingAfterFailure(j); err != nil {
 		return "", err
 	}
+	if err := boundsTheRunsWallClock(j); err != nil {
+		return "", err
+	}
 
 	return encodeDocs(np, j)
 }

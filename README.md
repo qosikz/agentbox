@@ -464,7 +464,7 @@ a duration and stops the render as an invalid policy, rather than falling throug
 to that same default.) Rendering is deterministic, so the same inputs produce a
 byte-identical manifest you can diff and pin.
 
-Three of those need their limits read with them. `backoffLimit: 0` with
+Four of those need their limits read with them. `backoffLimit: 0` with
 `restartPolicy: Never` asks the cluster never to re-run a failed agent, and that
 is **not** at-most-once execution either — it stops the retries Andbo would ask
 for, not the ones the cluster causes. If a run does fail, the Job ends in
@@ -484,6 +484,21 @@ and nothing re-verifies them. It is an identity guarantee only when
 different bytes each time. The pull itself is the kubelet's, from whatever
 registry and credentials the node has: Andbo neither signs, verifies, nor admits
 the image, and the `NetworkPolicy` does not restrict the pull.
+
+Finally, `activeDeadlineSeconds` is when the cluster **begins** ending the run,
+not when the agent stops. The Job controller deletes the pod through a call that
+carries no delete options at all, so it cannot ask for a shorter shutdown: the
+agent keeps running for the pod's `terminationGracePeriodSeconds` — 30 seconds,
+the default, since Andbo sets none — between SIGTERM and SIGKILL, which is long
+enough for a commit or push already under way to finish. The Job is then left in
+`DeadlineExceeded` with its pod and logs deleted, so that state is **not**
+evidence the agent did nothing: check the repository, not the Job. The budget
+measures one continuously-active period rather than the Job's lifetime — it runs
+from `status.startTime`, is not evaluated at all while the Job is suspended, and
+resets on resume, so anyone who can suspend and resume the Job hands the run a
+fresh full budget each time. And enforcement is entirely the cluster's: nothing
+in Andbo supervises a pod, so a Job reconciled by another controller through
+`managedBy` gets no deadline applied at all.
 
 Where it fails closed instead of downgrading — all of these exit **2**:
 `network.mode` `allowlist` and `open` are **rejected** (NetworkPolicy selects by
