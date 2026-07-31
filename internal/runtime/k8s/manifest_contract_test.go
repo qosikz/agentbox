@@ -3,6 +3,7 @@ package k8s
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -382,15 +383,17 @@ func TestSecurity_NoOtherFieldCanReinstateRetries(t *testing.T) {
 				t.Fatalf("Render() = %v, want nil", err)
 			}
 
-			jobSpec, ok := dig(t, docs(t, manifest)[1], "spec").(map[string]any)
+			renderedJobSpec, ok := dig(t, docs(t, manifest)[1], "spec").(map[string]any)
 			if !ok {
 				t.Fatal("job spec is not a mapping")
 			}
-			for field := range jobSpec {
-				if !allowed[field] {
-					t.Errorf("spec.%s is rendered and is not part of the no-retry contract; a Job field outside this set can hand back the retries backoffLimit 0 refuses (podFailurePolicy action Ignore does not count a failure against the budget and replaces the pod anyway; managedBy moves reconciliation off the Job controller entirely). Decide what it does to the contract, then add it to this set", field)
-				}
-			}
+			// Struct AND rendered keys. Walking only what rendered left this
+			// closure blind to any field added with omitempty that the fixtures
+			// leave at zero — proven with managedBy, the very field named below,
+			// which took the whole repository green while rendering normally for
+			// a caller who set it. See declaredKeys.
+			assertClosed(t, "spec", declaredKeys(t, reflect.TypeOf(jobSpec{})), renderedJobSpec, allowed,
+				"the no-retry contract; a Job field outside this set can hand back the retries backoffLimit 0 refuses (podFailurePolicy action Ignore does not count a failure against the budget and replaces the pod anyway; managedBy moves reconciliation off the Job controller entirely)")
 
 			// Exactly the fields the container struct declares, closed for the
 			// same reason Job.spec is: naming restartPolicy alone would catch
@@ -401,6 +404,13 @@ func TestSecurity_NoOtherFieldCanReinstateRetries(t *testing.T) {
 				"env": true, "resources": true, "securityContext": true,
 				"volumeMounts": true,
 			}
+
+			// The container STRUCT, checked once: a field declared there is
+			// reachable by any caller, and an omitempty one renders in no
+			// fixture. A container-level lifecycle hook was the demonstrated
+			// case.
+			assertClosed(t, "container", declaredKeys(t, reflect.TypeOf(container{})), nil, allowedOnContainer,
+				"the contract this package states about containers; a container field bears on whether the kubelet may restart it (restartPolicyRules and whatever succeeds it) or on how long it takes to stop (a lifecycle preStop hook runs inside the termination grace period)")
 
 			for cname, c := range allContainers(t, manifest) {
 				if v, present := c["restartPolicy"]; present {
@@ -669,9 +679,28 @@ func TestSecurity_WallClockBoundsAreStated(t *testing.T) {
 		// The size of the overrun, which is what makes it actionable: an
 		// operator who reads "terminated at 1800s" plans differently from one
 		// who reads "SIGTERM at 1800s, SIGKILL 30 seconds later".
-		{"the grace period is added to every budget", "goes on running for the pod's terminationgraceperiodseconds"},
+		{"the grace period is added to every budget", "up to the pod's terminationgraceperiodseconds"},
+		// Both halves, because the note previously stated only the reassuring
+		// one. A grace period is a CEILING — an agent that handles SIGTERM exits
+		// at once — and the push that does not fit in what is left is not
+		// "unfinished" but killed part-way, which is the outcome an operator
+		// most needs to be told about.
+		{"the grace period is a ceiling, not a duration", "ceiling and not a duration"},
+		{"a push that overruns is killed part-way", "sigkilled mid-flight"},
 		{"a Job that hit its deadline is not a Job that did nothing", "is not evidence that the agent did nothing"},
-		{"the budget is per active period, not per Job", "hands the run a fresh full budget each time"},
+		// This clause replaced an overclaim, and the overclaim was pinned here.
+		// The note used to say a suspend/resume cycle hands the run a fresh full
+		// budget "each time" — true of a generic Job, false of this manifest, and
+		// review caught it against the controller source. backoffLimit 0 makes
+		// the first suspend of a RUNNING Job terminal: the suspend deletes the
+		// pod, isPodFailed counts a deleted pod as failed (the exemption needs
+		// podReplacementPolicy Failed, defaulted only alongside a podFailurePolicy
+		// this renderer never emits), and 1 > 0 finishes the Job as
+		// BackoffLimitExceeded. Asserting the CONSEQUENCE rather than the
+		// mechanism is the point: a note that describes suspend/resume correctly
+		// and draws the wrong conclusion is what was here before.
+		{"suspending a running Job ends it rather than pausing it", "does not pause an andbo run, it kills it"},
+		{"the immutable list is spec fields, not the whole update path", "not everything the update path checks"},
 		// The suspend/resume route was documented first and is the more
 		// interesting one, which is exactly why it must not stand alone: it
 		// reads as though defeating the budget takes a trick. It does not.
@@ -688,6 +717,74 @@ func TestSecurity_WallClockBoundsAreStated(t *testing.T) {
 		}
 	}
 }
+
+// declaredKeys returns the YAML key of every field a manifest struct declares,
+// whether or not any fixture causes it to be rendered.
+//
+// This exists because the key-set closures in this file walk the RENDERED
+// manifest, and review demonstrated what that misses. A field added with
+// `omitempty` and left at its zero value by the fixtures renders nothing, so no
+// walk over the output can see it — while it renders perfectly well for a caller
+// who sets it. Measured on the merged contract: adding
+// `ManagedBy string \`yaml:"managedBy,omitempty"\“ to jobSpec, wired from a new
+// JobSpec field, took the WHOLE REPOSITORY green with no golden regeneration,
+// and a caller setting it rendered `managedBy:` beside a correct
+// `activeDeadlineSeconds:` — which switches the Job to an external controller and
+// so disables the deadline AND backoffLimit together. That is the exact field
+// both closures name in their own failure messages as the thing they exist to
+// catch.
+//
+// The crack was already written down and not recognised: the pod-spec closure
+// notes that three of its keys "render only when set" and that the check is
+// therefore one-directional. That tolerance for known optional fields is also a
+// hole for unknown ones — validSpec sets neither serviceAccountName nor
+// runtimeClassName, so the closure had in fact never seen two of the keys in its
+// own allow-list.
+//
+// Reading the STRUCT closes it at the source: a field that exists can be seen
+// here whatever any fixture does with it. The rendered-key walks stay, because
+// the two catch different things — this one cannot see a key that appears
+// without a struct field behind it (a nested map, or a renamed tag), and that
+// walk cannot see a field that did not render.
+func declaredKeys(t *testing.T, typ reflect.Type) []string {
+	t.Helper()
+	var out []string
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		tag, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+		switch tag {
+		case "-":
+			continue
+		case "":
+			// yaml.v3 lowercases the field name when no tag is given.
+			tag = strings.ToLower(f.Name)
+		}
+		out = append(out, tag)
+	}
+	return out
+}
+
+// assertClosed checks both directions at once: every key the struct DECLARES and
+// every key the manifest RENDERED must be in the allowed set. contract names the
+// property being defended, so a maintainer who adds a field is told which
+// decision they are being asked to make.
+func assertClosed(t *testing.T, path string, declared []string, rendered map[string]any, allowed map[string]bool, contract string) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, k := range declared {
+		seen[k] = true
+		if !allowed[k] {
+			t.Errorf("%s.%s is declared by the manifest struct and is not part of %s. It renders for any caller that sets it, whether or not the fixtures here do — which is precisely how this check was blind before. %s", path, k, contract, closureAdvice)
+		}
+	}
+	for k := range rendered {
+		if !allowed[k] && !seen[k] {
+			t.Errorf("%s.%s is rendered without a struct field of that name behind it and is not part of %s. %s", path, k, contract, closureAdvice)
+		}
+	}
+}
+
+const closureAdvice = "Decide what it does to the contract, then add it to this set."
 
 // deadlineSpecs returns transportSpecs with a distinctive budget, so an
 // assertion about the rendered deadline cannot be satisfied by a constant. The
@@ -845,25 +942,19 @@ func TestSecurity_NoOtherFieldCanExtendTheRunsWallClock(t *testing.T) {
 			}
 			job := docs(t, manifest)[1]
 
-			jobSpec, ok := dig(t, job, "spec").(map[string]any)
+			renderedJobSpec, ok := dig(t, job, "spec").(map[string]any)
 			if !ok {
 				t.Fatal("job spec is not a mapping")
 			}
-			for field := range jobSpec {
-				if !allowedOnJobSpec[field] {
-					t.Errorf("spec.%s is rendered and is not part of the wall-clock contract; a Job field outside this set can reset the clock activeDeadlineSeconds starts (suspend resets status.startTime on resume, and the deadline is measured from it) or take enforcement away from the Job controller entirely (managedBy). Decide what it does to the run's bound, then add it to this set", field)
-				}
-			}
+			assertClosed(t, "spec", declaredKeys(t, reflect.TypeOf(jobSpec{})), renderedJobSpec, allowedOnJobSpec,
+				"the wall-clock contract; a Job field outside this set can end or restart the clock activeDeadlineSeconds starts (suspending a running Job deletes its pod, which against backoffLimit 0 finishes the Job outright) or take enforcement away from the Job controller entirely (managedBy)")
 
 			pod, ok := dig(t, job, "spec", "template", "spec").(map[string]any)
 			if !ok {
 				t.Fatal("job spec.template.spec is not a mapping")
 			}
-			for field := range pod {
-				if !allowedOnPodSpec[field] {
-					t.Errorf("spec.template.spec.%s is rendered and is not part of the wall-clock contract; a pod field outside this set is added to every budget this package renders (terminationGracePeriodSeconds is the whole time between the SIGTERM the deadline triggers and the SIGKILL that follows it) or bounds something other than what it appears to (a pod-level activeDeadlineSeconds is the kubelet's, not the Job's). Decide what it does to the run's bound, then add it to this set", field)
-				}
-			}
+			assertClosed(t, "spec.template.spec", declaredKeys(t, reflect.TypeOf(podSpec{})), pod, allowedOnPodSpec,
+				"the wall-clock contract; a pod field outside this set is added to every budget this package renders (terminationGracePeriodSeconds is the ceiling on the time between the SIGTERM the deadline triggers and the SIGKILL that follows it) or bounds something other than what it appears to (a pod-level activeDeadlineSeconds is the kubelet's, not the Job's)")
 		})
 	}
 }
