@@ -162,12 +162,13 @@ All notable changes to Andbo are documented here.
 
   The enforcement note now states that the deadline is when the cluster *begins*
   ending the run and not when the agent stops, that the agent goes on running for
-  the 30-second grace period afterwards — long enough for a commit or push
-  already under way to finish — that a `DeadlineExceeded` Job with its pod and
-  logs deleted is **not** evidence the agent did nothing, that suspending and
-  resuming a Job hands the run a fresh full budget each time, and that a Job
-  reconciled by another controller through `managedBy` has no deadline applied
-  at all.
+  up to the pod's grace period afterwards, that a `DeadlineExceeded` Job with its
+  pod and logs deleted is **not** evidence the agent did nothing, and that a Job
+  reconciled by another controller through `managedBy` has no deadline applied at
+  all. (Two claims this entry originally made about that note did not survive its
+  own re-review and are corrected above: the grace period is a ceiling rather
+  than a duration, and a suspend/resume cycle does **not** hand the run a fresh
+  budget — for this manifest it ends the run.)
 - **Kubernetes renderer: nothing enforced the no-retry contract at render time.**
   The rendered manifest is unchanged and always carried `backoffLimit: 0` with
   `restartPolicy: Never`; this hardens what holds them there. Both are now
