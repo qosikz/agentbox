@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -211,5 +212,114 @@ func TestDoctorStillExitsZeroOnAnInvalidPolicy(t *testing.T) {
 		return NewRoot("test", "none", "now").cmdDoctor(nil)
 	}); err != nil {
 		t.Errorf("doctor returned an error: %v", err)
+	}
+}
+
+// TestAppleDoctorCheck covers the platform-scoped `container` row.
+//
+// Apple Container ships only for macOS on Apple silicon, so a missing binary on
+// Linux is not a finding — it is the only possible answer, and a ✗ there would
+// be noise for users who can never use this engine.
+func TestAppleDoctorCheck(t *testing.T) {
+	found := func(string) (string, error) { return "/usr/local/bin/container", nil }
+	missing := func(string) (string, error) { return "", errors.New("not found") }
+	version := func(v string) func() (string, error) {
+		return func() (string, error) { return v, nil }
+	}
+	versionFails := func() (string, error) { return "", errors.New("sw_vers: no such file") }
+
+	tests := []struct {
+		name       string
+		goos       string
+		goarch     string
+		macOSVer   func() (string, error)
+		lookPath   func(string) (string, error)
+		wantEmit   bool
+		wantOK     bool
+		wantDetail []string
+		unwantedIn []string
+	}{
+		{
+			name: "linux emits nothing", goos: "linux", goarch: "amd64",
+			macOSVer: versionFails, lookPath: missing, wantEmit: false,
+		},
+		{
+			name: "darwin arm64 with the binary", goos: "darwin", goarch: "arm64",
+			macOSVer: version("26.5.2"), lookPath: found, wantEmit: true, wantOK: true,
+			wantDetail: []string{"/usr/local/bin/container"},
+		},
+
+		{
+			name: "a newer macOS is still usable", goos: "darwin", goarch: "arm64",
+			macOSVer: version("27.0"), lookPath: found, wantEmit: true, wantOK: true,
+			wantDetail: []string{"/usr/local/bin/container"},
+		},
+		{
+			name: "missing binary is a finding", goos: "darwin", goarch: "arm64",
+			macOSVer: version("26.5.2"), lookPath: missing, wantEmit: true, wantOK: false,
+			wantDetail: []string{"not found on PATH", "--engine apple"},
+		},
+		{
+			name: "intel mac cannot use it", goos: "darwin", goarch: "amd64",
+			macOSVer: version("26.5.2"), lookPath: found, wantEmit: true, wantOK: false,
+			wantDetail: []string{"Apple silicon", "darwin/amd64"},
+		},
+		// The point of the version row: an installed `container` binary on
+		// macOS 25 must NOT be reported as usable. Doctor is what a user runs
+		// after a failed run, so a ✓ here would send them hunting elsewhere.
+		{
+			name: "macOS 25 is reported incompatible despite the binary", goos: "darwin", goarch: "arm64",
+			macOSVer: version("25.6"), lookPath: found, wantEmit: true, wantOK: false,
+			wantDetail: []string{"macOS 26", "25.6"},
+			unwantedIn: []string{"/usr/local/bin/container"},
+		},
+		{
+			name: "an unparseable version is reported incompatible", goos: "darwin", goarch: "arm64",
+			macOSVer: version(""), lookPath: found, wantEmit: true, wantOK: false,
+			wantDetail: []string{"macOS 26"},
+			unwantedIn: []string{"/usr/local/bin/container"},
+		},
+		{
+			name: "a failed version lookup is reported, not assumed away", goos: "darwin", goarch: "arm64",
+			macOSVer: versionFails, lookPath: found, wantEmit: true, wantOK: false,
+			wantDetail: []string{"macOS 26", "sw_vers"},
+			unwantedIn: []string{"/usr/local/bin/container"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			check, emitted := appleDoctorCheck(tt.goos, tt.goarch, tt.macOSVer, tt.lookPath)
+			if emitted != tt.wantEmit {
+				t.Fatalf("emitted = %v, want %v", emitted, tt.wantEmit)
+			}
+			if !tt.wantEmit {
+				return
+			}
+			if check.Name != "container" {
+				t.Errorf("check name = %q, want container (the binary name, matching the other rows)", check.Name)
+			}
+			// The row must fit doctor's %-14s column or the table misaligns.
+			if len(check.Name) > 14 {
+				t.Errorf("check name %q exceeds the 14-char column", check.Name)
+			}
+			if check.OK != tt.wantOK {
+				t.Errorf("OK = %v, want %v", check.OK, tt.wantOK)
+			}
+			for _, want := range tt.wantDetail {
+				if !strings.Contains(check.Detail, want) {
+					t.Errorf("detail %q missing %q", check.Detail, want)
+				}
+			}
+			for _, unwanted := range tt.unwantedIn {
+				if strings.Contains(check.Detail, unwanted) {
+					t.Errorf("detail %q reports %q as usable", check.Detail, unwanted)
+				}
+			}
+			// Doctor prints one aligned row per check; a newline in the detail
+			// lands under the table with no check name against it.
+			if strings.Contains(check.Detail, "\n") {
+				t.Errorf("detail %q spans multiple lines", check.Detail)
+			}
+		})
 	}
 }

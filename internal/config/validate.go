@@ -32,8 +32,8 @@ func (p Policy) Check() CheckResult {
 	if !contains([]string{"container", "local"}, p.Runtime.Isolation) {
 		r.Errors = append(r.Errors, fmt.Sprintf("runtime.isolation %q is invalid (expected: container, local)", p.Runtime.Isolation))
 	}
-	if !contains([]string{"docker", "podman"}, p.Runtime.Engine) {
-		r.Errors = append(r.Errors, fmt.Sprintf("runtime.engine %q is invalid (expected: docker, podman)", p.Runtime.Engine))
+	if !contains([]string{"docker", "podman", "apple"}, p.Runtime.Engine) {
+		r.Errors = append(r.Errors, fmt.Sprintf("runtime.engine %q is invalid (expected: docker, podman, apple)", p.Runtime.Engine))
 	}
 	if p.Runtime.Image == "" {
 		r.Errors = append(r.Errors, "runtime.image must not be empty")
@@ -55,6 +55,14 @@ func (p Policy) Check() CheckResult {
 		}
 		if p.Runtime.Isolation == "local" {
 			r.UnsupportedModes = append(r.UnsupportedModes, "network.mode=allowlist cannot be enforced with runtime.isolation=local; container isolation is required for egress enforcement")
+		}
+		if p.Runtime.Engine == "apple" {
+			// Andbo's egress proxy is provisioned with docker/podman networks;
+			// the apple engine exposes no equivalent Andbo can drive, and its
+			// runner refuses allowlist mode outright rather than falling open.
+			// Reported here so `policy check` and `doctor` surface it before a
+			// run does.
+			r.UnsupportedModes = append(r.UnsupportedModes, "network.mode=allowlist cannot be enforced with runtime.engine=apple; the run fails closed. Use runtime.engine docker or podman for egress enforcement, or set network.mode=deny")
 		}
 	}
 	for _, port := range p.Network.Ports {

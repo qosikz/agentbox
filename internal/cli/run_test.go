@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/qosikz/andbo/internal/config"
+	"github.com/qosikz/andbo/internal/policy"
 	"github.com/qosikz/andbo/internal/session"
 )
 
@@ -177,6 +178,64 @@ func TestRunInvalidEngineFlag(t *testing.T) {
 	err := r.cmdRun(context.Background(), []string{"task", "--engine", "rocketship", "--dry-run"})
 	if CodeFor(err) != ExitInvalidConfig {
 		t.Errorf("invalid --engine should exit %d, got %d (err=%v)", ExitInvalidConfig, CodeFor(err), err)
+	}
+}
+
+// TestRunAcceptsAppleEngineFlag: --engine apple must pass flag validation. The
+// engine's own platform gate reports an unusable host later, with a fix named;
+// rejecting it here would misreport a supported value as invalid config.
+func TestRunAcceptsAppleEngineFlag(t *testing.T) {
+	o, err := parseRunFlags([]string{"task", "--engine", "apple"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.engine != "apple" {
+		t.Errorf("engine = %q, want apple", o.engine)
+	}
+	setupProject(t)
+	r := NewRoot("test", "none", "now")
+	// --dry-run keeps this off any real engine; we only assert it is not
+	// rejected as an invalid enum value.
+	if err := r.cmdRun(context.Background(), []string{"task", "--engine", "apple", "--dry-run"}); CodeFor(err) == ExitInvalidConfig {
+		t.Errorf("--engine apple was rejected as invalid config: %v", err)
+	}
+}
+
+// TestRunInvalidEngineErrorNamesApple: the error must list every accepted
+// engine, or the new one is undiscoverable.
+func TestRunInvalidEngineErrorNamesApple(t *testing.T) {
+	setupProject(t)
+	r := NewRoot("test", "none", "now")
+	err := r.cmdRun(context.Background(), []string{"task", "--engine", "rocketship", "--dry-run"})
+	if err == nil {
+		t.Fatal("expected an error for an unknown engine")
+	}
+	if !strings.Contains(err.Error(), "docker, podman, apple") {
+		t.Errorf("error %q should list docker, podman, apple", err)
+	}
+}
+
+// TestSelectRunnerApple wires the policy value through to the runner.
+func TestSelectRunnerApple(t *testing.T) {
+	ep := policy.EffectivePolicy{}
+	ep.Runtime.Isolation = "container"
+	ep.Runtime.Engine = "apple"
+
+	runner, err := selectRunner(ep, runOptions{})
+	if err != nil {
+		t.Fatalf("selectRunner(apple) returned an error: %v", err)
+	}
+	if got := runner.Name(); got != "apple" {
+		t.Errorf("runner.Name() = %q, want apple", got)
+	}
+
+	ep.Runtime.Engine = "colima"
+	_, err = selectRunner(ep, runOptions{})
+	if err == nil {
+		t.Fatal("expected an error for an unknown engine")
+	}
+	if !strings.Contains(err.Error(), "docker, podman, apple") {
+		t.Errorf("error %q should list docker, podman, apple", err)
 	}
 }
 

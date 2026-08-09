@@ -120,6 +120,74 @@ func TestCheckDetectsErrorsAndUnsafe(t *testing.T) {
 	}
 }
 
+// TestCheckAppleEngineIsValid: the apple engine is a supported enum value, so a
+// policy naming it must not be rejected as invalid config.
+func TestCheckAppleEngineIsValid(t *testing.T) {
+	p := DefaultPolicy()
+	p.Runtime.Engine = "apple"
+	r := p.Check()
+	for _, e := range r.Errors {
+		if strings.Contains(e, "runtime.engine") {
+			t.Errorf("runtime.engine=apple was rejected: %q", e)
+		}
+	}
+}
+
+// TestCheckUnknownEngineNamesApple: the enum error must list every accepted
+// value, or a user cannot discover the new one.
+func TestCheckUnknownEngineNamesApple(t *testing.T) {
+	p := DefaultPolicy()
+	p.Runtime.Engine = "colima"
+	r := p.Check()
+	if r.OK() {
+		t.Fatal("runtime.engine=colima should be invalid")
+	}
+	var found bool
+	for _, e := range r.Errors {
+		if strings.Contains(e, "docker, podman, apple") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("enum error should list docker, podman, apple; got %v", r.Errors)
+	}
+}
+
+// TestCheckAppleWithAllowlistIsUnsupported: the apple runner refuses allowlist
+// mode outright, so `policy check` must report it BEFORE a run hits it. It is
+// reported as an unsupported mode rather than an error: the policy itself is
+// well-formed, and turning it into an error would make `andbo doctor` start
+// failing on a config it previously accepted.
+func TestCheckAppleWithAllowlistIsUnsupported(t *testing.T) {
+	p := DefaultPolicy()
+	p.Runtime.Engine = "apple"
+	p.Network.Mode = "allowlist"
+	p.Network.Allow = []string{"api.example.com"}
+	r := p.Check()
+
+	if !r.OK() {
+		t.Errorf("policy should remain valid, got errors %v", r.Errors)
+	}
+	var found bool
+	for _, m := range r.UnsupportedModes {
+		if strings.Contains(m, "runtime.engine=apple") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an unsupported-mode entry naming runtime.engine=apple, got %v", r.UnsupportedModes)
+	}
+
+	// The guard must be engine-specific: docker still enforces allowlist, so it
+	// must NOT inherit the apple warning.
+	p.Runtime.Engine = "docker"
+	for _, m := range p.Check().UnsupportedModes {
+		if strings.Contains(m, "runtime.engine=apple") {
+			t.Errorf("docker engine wrongly reported the apple limitation: %q", m)
+		}
+	}
+}
+
 func TestCheckValidDefaultPolicyOK(t *testing.T) {
 	if r := DefaultPolicy().Check(); !r.OK() {
 		t.Errorf("default policy should be valid, errors: %v", r.Errors)

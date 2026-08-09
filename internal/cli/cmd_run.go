@@ -125,8 +125,8 @@ func (r *Root) cmdRun(ctx context.Context, args []string) error {
 		return codedf(ExitInvalidConfig, "policy %s is invalid; run 'andbo policy check'", o.policy)
 	}
 
-	if o.engine != "" && o.engine != "docker" && o.engine != "podman" {
-		return codedf(ExitInvalidConfig, "--engine %q is invalid (expected: docker, podman)", o.engine)
+	if o.engine != "" && o.engine != "docker" && o.engine != "podman" && o.engine != "apple" {
+		return codedf(ExitInvalidConfig, "--engine %q is invalid (expected: docker, podman, apple)", o.engine)
 	}
 	// Security: an unrecognized --runtime value must not silently route the run
 	// down an unexpected path (e.g. host-env handling).
@@ -683,8 +683,13 @@ func selectRunner(ep policy.EffectivePolicy, o runOptions) (runtime.Runner, erro
 		return runtime.NewDockerRunner(), nil
 	case "podman":
 		return runtime.NewPodmanRunner(), nil
+	case "apple":
+		// Apple Container. Never selected automatically — only by an explicit
+		// runtime.engine or --engine, and only usable on darwin/arm64, which
+		// the runner's Available() gate reports with an actionable error.
+		return runtime.NewAppleRunner(), nil
 	default:
-		return nil, codedf(ExitRuntimeUnavail, "unknown runtime engine %q (expected: docker, podman)", ep.Runtime.Engine)
+		return nil, codedf(ExitRuntimeUnavail, "unknown runtime engine %q (expected: docker, podman, apple)", ep.Runtime.Engine)
 	}
 }
 
