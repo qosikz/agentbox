@@ -41,8 +41,11 @@ boundaries **and the honest limitations** are, in short:
   egress to arbitrary TCP toward your allowlisted host:port (still domain- and
   anti-SSRF-checked), so it is an explicit, opt-in choice. `open` is an explicit
   unsafe opt-in.
-- **Runtime** — non-root, `--cap-drop ALL`, `--security-opt no-new-privileges`,
-  never privileged, never the Docker socket.
+- **Runtime** — non-root, `--cap-drop ALL`, never privileged, never the Docker
+  socket. `--security-opt no-new-privileges` is applied on the **docker and
+  podman** engines; the `apple` engine has no equivalent flag, so it drops all
+  capabilities and runs non-root but does **not** block setuid privilege
+  escalation inside the container.
 - **Kubernetes (`andbo k8s render`)** — **rendering only, nothing enforced at
   runtime.** Andbo emits a hardened `Job` and a default-deny `NetworkPolicy` and
   never contacts a cluster, so every control in those manifests is enforced by

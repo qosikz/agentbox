@@ -114,9 +114,11 @@ commands. Andbo puts deterministic guardrails around them:
   exit is an egress proxy restricted to your `network.allow` domains — anything
   else fails closed, and every allow/deny is recorded in the session. `open`
   requires explicit unsafe confirmation.
-- **Runtime** — containers run as a non-root user with `--cap-drop ALL` and
-  `--security-opt no-new-privileges`; never privileged, never the Docker socket.
-  Works with Docker or Podman.
+- **Runtime** — containers run as a non-root user with `--cap-drop ALL`; never
+  privileged, never the Docker socket. On Docker and Podman they also get
+  `--security-opt no-new-privileges`; the optional `apple` engine (Apple
+  Container) has no equivalent flag, so it is non-root and capability-dropped
+  but does not block setuid privilege escalation.
 - **MCP** — a static scanner flags dangerous MCP server capabilities before you trust them.
 - **Audit** — every run is recorded under `.andbo/sessions/<id>/`.
 
@@ -229,7 +231,7 @@ ports 80/443 by default).
    │   ① Disposable workspace   copy-on-run; repo never mounted wholesale
    │            │               (.env, ~/.ssh, ~/.aws, Docker socket excluded)
    │            ▼
-   │   ② Container runtime      non-root · --cap-drop ALL · no-new-privileges;
+   │   ② Container runtime      non-root · --cap-drop ALL · no-new-privileges†
    │            │               only secrets.allow keys injected, redacted in logs
    │            ▼
    │   ③ Egress proxy           per-run internal network · DNS sunk · fail closed
@@ -238,6 +240,11 @@ ports 80/443 by default).
                 ▼
    Allowlisted domains only   e.g. your model API — everything else denied
 ```
+
+† `no-new-privileges` applies to the `docker` and `podman` engines. The optional
+`apple` engine has no equivalent flag: it is non-root and drops all
+capabilities, but does not block setuid privilege escalation. It also cannot
+enforce ③ — see [runtime knobs](#policy).
 
 Local mode (`--runtime local --unsafe`) skips the container and egress proxy: it
 forwards a minimal env and runs on the host, and says so. **Container mode is the
@@ -270,7 +277,7 @@ failure code otherwise — `run`/`exec` pass the agent's own exit code through.
 --agent <name>            custom | claude | codex | gemini | goose | opencode
 --policy <file>           Policy file (default: andbo.yaml)
 --network deny|allowlist|open
---engine docker|podman    Container engine (default: policy runtime.engine)
+--engine <name>           docker | podman | apple (default: policy runtime.engine)
 --write <path>            Add a writable path (repeatable)
 --commit                  Commit the agent's changes on a new branch
 --open-pr                 Open a pull request (requires the gh CLI)
@@ -657,8 +664,33 @@ are passed unless named in `secrets.allow`.
 
 A few runtime knobs worth knowing:
 
-- `runtime.engine: docker | podman` selects the container engine (or use
-  `--engine` per run).
+- `runtime.engine: docker | podman | apple` selects the container engine (or use
+  `--engine` per run). `apple` drives Apple Container's `container` CLI and
+  requires macOS 26 or newer on Apple silicon (darwin/arm64); Andbo verifies the
+  host version and service readiness before starting anything. Nothing selects
+  it automatically and `docker` remains the default. Four limits are deliberate:
+
+  - `network.mode: allowlist` is **refused** — Andbo's egress proxy is built on
+    docker/podman networks and this engine exposes no equivalent, so the run
+    fails closed with an actionable error rather than falling open or silently
+    denying. Use `docker`/`podman` for egress enforcement, or `network.mode:
+    deny`.
+  - There is no `--security-opt no-new-privileges` equivalent, so hardening is
+    **not** identical to docker/podman (see the note under the diagram above).
+  - `privileged` and `--allow-docker-socket` are refused; both are unsupported
+    by this engine.
+  - Engine failures are **not** distinguished from agent failures: this engine
+    reports its own errors as exit 1, which an agent can also return, so Andbo
+    passes non-zero exits through as the command's own and surfaces the CLI's
+    stderr verbatim. A stopped service is caught before the run instead, with
+    `container system start` named as the fix.
+
+  The container root filesystem is mounted read-only with a writable `/tmp`;
+  workspace writes arrive as explicit bind mounts. The backend was manually
+  verified with the signed Apple Container 1.2.2 package on macOS 26.5.2 and
+  Apple M4: `--network none` exposed loopback only, uid/gid 10001 executed
+  successfully, `/tmp` remained writable, and the non-root process wrote to an
+  explicitly writable bind-mounted workspace.
 - `budget.max_runtime_minutes` is enforced as a hard deadline on real runs —
   the agent is stopped when it expires (dry-run is unaffected). `0` means no
   deadline at all for `run` and `exec` (`k8s render` substitutes its own bounded

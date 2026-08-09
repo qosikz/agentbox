@@ -27,7 +27,7 @@ var homeDenyPrefixes = []string{"~/."}
 type Overrides struct {
 	Network           string   // "" | deny | allowlist | open
 	Runtime           string   // "" | container | local
-	Engine            string   // "" | docker | podman
+	Engine            string   // "" | docker | podman | apple
 	Agent             string   // "" | adapter name
 	ExtraWrite        []string // additional --write paths
 	Unsafe            bool     // master unsafe switch

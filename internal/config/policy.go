@@ -36,7 +36,7 @@ type Policy struct {
 // RuntimePolicy controls how and where the agent executes.
 type RuntimePolicy struct {
 	Isolation string `yaml:"isolation"` // container | local
-	Engine    string `yaml:"engine"`    // docker | podman
+	Engine    string `yaml:"engine"`    // docker | podman | apple (Apple Container; macOS/arm64 only)
 	Image     string `yaml:"image"`
 	Cleanup   bool   `yaml:"cleanup"`
 }
@@ -181,7 +181,7 @@ const DefaultPolicyYAML = `# Andbo policy
 
 runtime:
   isolation: container        # container (safe) | local (unsafe)
-  engine: docker              # docker | podman
+  engine: docker              # docker | podman | apple (Apple Container; macOS on Apple silicon)
   image: ghcr.io/qosikz/andbo/runtime:latest   # published default; pull is automatic
   cleanup: true
 

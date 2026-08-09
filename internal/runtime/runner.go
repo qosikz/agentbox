@@ -15,7 +15,7 @@ import (
 // The security-relevant fields encode Andbo's secure defaults: no docker
 // socket, non-root user, no privileged mode.
 type RuntimeSpec struct {
-	Engine            string            // docker | podman | dryrun
+	Engine            string            // docker | podman | apple | dryrun
 	Image             string            // container image
 	NetworkMode       string            // none | bridge | allowlist (enforced mapping of policy)
 	AllowedDomains    []string          // egress allowlist (NetworkMode == "allowlist" only)

@@ -1,14 +1,16 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
+	goruntime "runtime"
 	"strings"
 
 	"github.com/qosikz/andbo/internal/config"
 	"github.com/qosikz/andbo/internal/netproxy"
+	"github.com/qosikz/andbo/internal/runtime"
 )
 
 type doctorCheck struct {
@@ -54,11 +56,51 @@ func policyIssues(cfg config.Policy, path string) []string {
 	return issues
 }
 
+// appleDoctorCheck reports the `container` (Apple Container) row, and whether
+// it should be shown at all.
+//
+// Apple Container ships only for macOS 26+ on Apple silicon, so the check is
+// OMITTED entirely off darwin rather than reported as failed: a ✗ on Linux
+// would be noise about an engine that user can never select. On an Intel Mac
+// the row IS shown, because "you are on the right OS but the wrong CPU" is a
+// real, non-obvious finding.
+//
+// The version gate runs BEFORE the PATH lookup and mirrors the runner's, so
+// doctor cannot report an installed binary as usable on a macOS the engine
+// refuses to run on. Doctor is what a user reaches for after a failed run; a ✓
+// there would send them looking in the wrong place.
+//
+// macOSVersion and lookPath are injected so every branch is testable on one host.
+func appleDoctorCheck(goos, goarch string, macOSVersion func() (string, error), lookPath func(string) (string, error)) (doctorCheck, bool) {
+	if goos != "darwin" {
+		return doctorCheck{}, false
+	}
+	if goarch != "arm64" {
+		return doctorCheck{"container", false,
+			fmt.Sprintf("requires Apple silicon; --engine apple is unavailable on %s/%s", goos, goarch)}, true
+	}
+	version, err := macOSVersion()
+	if err != nil {
+		return doctorCheck{"container", false,
+			fmt.Sprintf("requires macOS %d or newer and the version could not be read (`sw_vers -productVersion`: %v); "+
+				"--engine apple is unavailable", runtime.AppleMinMacOSMajor, err)}, true
+	}
+	if verr := runtime.MacOSVersionSupported(version); verr != nil {
+		return doctorCheck{"container", false, strings.ReplaceAll(verr.Error(), "\n", " ")}, true
+	}
+	path, err := lookPath("container")
+	if err != nil {
+		return doctorCheck{"container", false,
+			"not found on PATH; install from https://github.com/apple/container to use --engine apple"}, true
+	}
+	return doctorCheck{"container", true, path}, true
+}
+
 func (r *Root) cmdDoctor(args []string) error {
 	jsonOut := hasFlag(args, "--json")
 	var checks []doctorCheck
 
-	checks = append(checks, doctorCheck{"os", true, runtime.GOOS + "/" + runtime.GOARCH})
+	checks = append(checks, doctorCheck{"os", true, goruntime.GOOS + "/" + goruntime.GOARCH})
 	checks = append(checks, doctorCheck{"andbo", true, r.Version})
 
 	for _, bin := range []string{"docker", "podman", "git", "gh"} {
@@ -68,6 +110,11 @@ func (r *Root) cmdDoctor(args []string) error {
 		} else {
 			checks = append(checks, doctorCheck{bin, true, path})
 		}
+	}
+
+	macOSVersion := func() (string, error) { return runtime.MacOSProductVersion(context.Background()) }
+	if check, ok := appleDoctorCheck(goruntime.GOOS, goruntime.GOARCH, macOSVersion, exec.LookPath); ok {
+		checks = append(checks, check)
 	}
 
 	// Config file.

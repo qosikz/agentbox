@@ -41,10 +41,17 @@ func (dryRunRunner) Run(ctx context.Context, spec RuntimeSpec, command CommandSp
 	lines = append(lines, fmt.Sprintf("engine: %s", spec.Engine))
 	lines = append(lines, fmt.Sprintf("image: %s", spec.Image))
 	if spec.NetworkMode == "allowlist" {
-		// Don't assert enforcement unconditionally: a dev build without the
-		// embedded proxy would fail closed at run time. Check this build.
+		// Don't assert enforcement unconditionally: the claim depends on both
+		// the ENGINE and this build. Deciding it from the network mode alone
+		// would describe an egress proxy that never runs.
 		enforce := "would be enforced via egress proxy"
-		if !netproxy.Embedded(runtime.GOARCH) {
+		switch {
+		case spec.Engine == "apple":
+			// The apple engine refuses allowlist mode outright, so the real run
+			// fails closed. Saying "would be enforced" here would promise
+			// protection the run will never reach.
+			enforce = "NOT supported on the apple engine — the run fails closed; use --engine docker or podman"
+		case !netproxy.Embedded(runtime.GOARCH):
 			enforce = "NOT enforceable in this build — proxy not embedded; see `andbo doctor`"
 		}
 		lines = append(lines, fmt.Sprintf("network: allowlist (%s: %s)", enforce, strings.Join(spec.AllowedDomains, ", ")))

@@ -53,8 +53,8 @@ func (r *Root) cmdExec(ctx context.Context, args []string) error {
 		}
 		return codedf(ExitInvalidConfig, "policy %s is invalid; run 'andbo policy check'", o.policy)
 	}
-	if o.engine != "" && o.engine != "docker" && o.engine != "podman" {
-		return codedf(ExitInvalidConfig, "--engine %q is invalid (expected: docker, podman)", o.engine)
+	if o.engine != "" && o.engine != "docker" && o.engine != "podman" && o.engine != "apple" {
+		return codedf(ExitInvalidConfig, "--engine %q is invalid (expected: docker, podman, apple)", o.engine)
 	}
 	if o.runtime != "" && o.runtime != "container" && o.runtime != "local" {
 		return codedf(ExitInvalidConfig, "--runtime %q is invalid (expected: container, local)", o.runtime)

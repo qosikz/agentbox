@@ -4,7 +4,55 @@ All notable changes to Andbo are documented here.
 
 ## Unreleased
 
+## v0.7.0 — 2026-08-09 (Apple Container support)
+
 ### Added
+- **Apple Container is supported as engine `apple`, opt-in and darwin/arm64
+  only.** `runtime.engine: apple` or `--engine apple` selects it; nothing
+  auto-selects it and the default stays `docker`. The Apple CLI is *not*
+  docker-compatible, so it gets its own pure builder (`BuildAppleArgs`) rather
+  than reusing `BuildDockerArgs`, which is untouched: bind mounts are
+  `--mount type=bind,...` (there is no docker-style `:ro` suffix), there is no
+  `--security-opt` and no `--privileged`, and `--network` takes a network NAME
+  rather than a mode.
+
+  Four things are refused rather than approximated, each before anything
+  starts, each naming the engine to use instead: `network.mode: allowlist`
+  (Andbo's egress proxy is provisioned with docker/podman networks), privileged
+  mode, docker-socket mounting, and any mount path containing `,` or `=` (the
+  characters `--mount` is parsed with).
+
+  `--network` is emitted unconditionally, which is the security-load-bearing
+  part: omitting it does **not** mean "no network" on this engine — the service
+  creates a vmnet network named `default` that containers attach to unless told
+  otherwise, so an omitted flag falls OPEN. Only `open`/`bridge` reach
+  `default`; `""`, `deny`, `none` and every unrecognized value map to the
+  reserved `none`, which clears all attachments. Environment variables are
+  always emitted as `KEY=VALUE`, never a bare `KEY`, because this engine reads
+  a bare key as "inherit from the HOST environment".
+
+  The root filesystem is mounted `--read-only` paired with `--tmpfs /tmp`, so a
+  policy that works on docker does not fail on apple the first time anything
+  writes to `/tmp`.
+
+  Known limitations, stated rather than papered over: (1) no
+  `no-new-privileges` equivalent exists, so hardening is **not** identical to
+  docker/podman — capabilities are dropped and the container is non-root, but
+  setuid escalation is not blocked; (2) engine failures are indistinguishable
+  from agent failures, because this engine surfaces its own errors as exit 1,
+  so docker's exit-125 heuristic is not merely unported but unimplementable —
+  non-zero exits pass through as the command's own with stderr verbatim, and a
+  stopped service is instead caught before the run with `container system
+  start` named as the fix; and (3) bind sources must be existing directories,
+  unlike docker which permits file binds. Andbo verifies macOS 26+, Apple
+  silicon, CLI presence, and service readiness before starting a run.
+
+  Automated coverage exercises pure builders and injected process seams. The
+  backend was also manually verified with the signed Apple Container 1.2.2
+  package on macOS 26.5.2/Apple M4: argument parsing, VM startup, loopback-only
+  `--network none`, uid/gid 10001, read-only root with writable `/tmp`, writable
+  bind mounts, and a real `andbo exec` all completed successfully.
+
 - **Kubernetes runner: the Job's and the NetworkPolicy's own `metadata:` was
   reached by no contract in the repository, and is now closed at render time.**
   Two rendered mappings were unreached, not one — the other is the POD
@@ -283,6 +331,13 @@ All notable changes to Andbo are documented here.
   filesystem.
 
 ### Fixed
+- **`andbo run --dry-run` claimed egress-allowlist enforcement that the apple
+  engine will never perform.** The dry-run plan decided the phrase "would be
+  enforced via egress proxy" from the network mode alone, so a policy pairing
+  `runtime.engine: apple` with `network.mode: allowlist` was planned as
+  enforced even though the real run refuses it. The plan is now engine-aware
+  and reports that the run fails closed. The docker/podman description, and the
+  existing "proxy not embedded in this build" warning, are unchanged.
 - **Kubernetes runner: the README presented a partial immutability list as the
   list.** It said "the update validation's immutability checks name `selector`,
   `completionMode`, `podFailurePolicy`, `backoffLimitPerIndex`, `managedBy` and
